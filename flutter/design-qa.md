@@ -1,4 +1,4 @@
-# ShadowPlay design QA
+# Kivo design QA (formerly ShadowPlay)
 
 ## Visual truth and viewport
 

@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.ayon1xw" "\0"
-            VALUE "FileDescription", "shadowplay" "\0"
+            VALUE "FileDescription", "kivo" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "shadowplay" "\0"
+            VALUE "InternalName", "kivo" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.ayon1xw. All rights reserved." "\0"
-            VALUE "OriginalFilename", "shadowplay.exe" "\0"
-            VALUE "ProductName", "shadowplay" "\0"
+            VALUE "OriginalFilename", "kivo.exe" "\0"
+            VALUE "ProductName", "kivo" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

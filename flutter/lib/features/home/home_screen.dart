@@ -41,7 +41,7 @@ class HomeScreen extends StatelessWidget {
               connection: active,
               status: state.activeStatus,
               lastSyncUtc: state.lastSyncUtc,
-              title: 'ShadowPlay',
+              title: 'Kivo',
             ),
           ),
           SliverToBoxAdapter(

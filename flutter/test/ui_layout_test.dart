@@ -6,11 +6,11 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:shadowplay/app/app.dart';
-import 'package:shadowplay/core/app_state.dart';
-import 'package:shadowplay/core/models.dart';
-import 'package:shadowplay/features/clips/clips_screen.dart';
-import 'package:shadowplay/shared/recording_row.dart';
+import 'package:kivo/app/app.dart';
+import 'package:kivo/core/app_state.dart';
+import 'package:kivo/core/models.dart';
+import 'package:kivo/features/clips/clips_screen.dart';
+import 'package:kivo/shared/recording_row.dart';
 
 const _capture = bool.fromEnvironment('UI_REVIEW');
 final _boundary = GlobalKey();
@@ -69,7 +69,7 @@ Future<void> mount(
   tester.platformDispatcher.textScaleFactorTestValue = scale;
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
   await tester.pumpWidget(
-      RepaintBoundary(key: _boundary, child: ShadowPlayApp(state: state)));
+      RepaintBoundary(key: _boundary, child: KivoApp(state: state)));
   await tester.pump();
 }
 
@@ -111,7 +111,7 @@ void main() {
               AppState.deviceKey(state.activeServerId, 'sample-1')] =
           'Connection interrupted';
       await tester.pumpWidget(
-          RepaintBoundary(key: _boundary, child: ShadowPlayApp(state: state)));
+          RepaintBoundary(key: _boundary, child: KivoApp(state: state)));
       await tester.pump();
       expect(find.text('Downloading 42%'), findsOneWidget);
       expect(
@@ -181,7 +181,7 @@ void main() {
     state.deviceStatuses['sample-pc'] =
         const DeviceStatus.offline('PC is asleep');
     await tester.pumpWidget(
-        RepaintBoundary(key: _boundary, child: ShadowPlayApp(state: state)));
+        RepaintBoundary(key: _boundary, child: KivoApp(state: state)));
     await tester.tap(find.text('Clips'));
     await tester.pump();
     await tester.scrollUntilVisible(find.text('Try Again'), 160,

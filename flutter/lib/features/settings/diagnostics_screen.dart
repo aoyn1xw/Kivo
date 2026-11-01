@@ -13,7 +13,7 @@ Future<void> shareDiagnosticsReport(String path) async {
   await SharePlus.instance.share(
     ShareParams(
       files: [XFile(path)],
-      text: 'ShadowPlay diagnostics report',
+      text: 'Kivo diagnostics report',
     ),
   );
 }

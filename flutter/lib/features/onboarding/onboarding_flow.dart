@@ -95,7 +95,7 @@ class _IntroPage extends StatelessWidget {
         icon: Icons.sports_esports_outlined,
         title: 'Your recordings. On your phone.',
         message:
-            'Connect to ShadowPlay on your PC to browse gameplay recordings, download originals and watch them offline.',
+            'Connect to Kivo on your PC to browse gameplay recordings, download originals and watch them offline.',
         action:
             FilledButton(onPressed: onContinue, child: const Text('Continue')),
         children: const [
@@ -103,7 +103,7 @@ class _IntroPage extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.wifi),
               title: Text('Start on the same Wi-Fi'),
-              subtitle: Text('Keep ShadowPlay running on your PC.')),
+              subtitle: Text('Keep Kivo running on your PC.')),
           ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.qr_code_scanner),
@@ -122,7 +122,7 @@ class _PermissionPage extends StatelessWidget {
         icon: Icons.phonelink_outlined,
         title: 'Before you pair',
         message:
-            'ShadowPlay needs access to your PC and, if you scan a code, your camera.',
+            'Kivo needs access to your PC and, if you scan a code, your camera.',
         action:
             FilledButton(onPressed: onContinue, child: const Text('Continue')),
         children: const [
@@ -250,8 +250,7 @@ class _PairingPageState extends State<_PairingPage> {
       } catch (_) {
         widget.state.diagnostics
             .warning('pairing', 'Scanned payload is not a valid pairing QR');
-        setState(
-            () => _error = 'That is not a valid ShadowPlay pairing QR code.');
+        setState(() => _error = 'That is not a valid Kivo pairing QR code.');
       }
       return;
     }
@@ -440,7 +439,7 @@ class _PairingPageState extends State<_PairingPage> {
         Icon(Icons.qr_code_2,
             size: 64, color: Theme.of(context).colorScheme.primary),
         const SizedBox(height: 20),
-        const Text('Scan the one-time QR code shown in ShadowPlay on your PC.',
+        const Text('Scan the one-time QR code shown in Kivo on your PC.',
             textAlign: TextAlign.center),
         const SizedBox(height: 24),
         SizedBox(
@@ -551,7 +550,7 @@ class _PairingPageState extends State<_PairingPage> {
           setState(() {
             _permissionState = permission;
             _error = permission == AppPermissionState.denied
-                ? 'Local Network access is required. Allow it in iPhone Settings > ShadowPlay, then try again.'
+                ? 'Local Network access is required. Allow it in iPhone Settings > Kivo, then try again.'
                 : 'Local Network access is not available yet. Connect to Wi‑Fi and try again.';
           });
         }
@@ -595,7 +594,7 @@ class _PairingPageState extends State<_PairingPage> {
           setState(() {
             _permissionState = permission;
             _error = permission == AppPermissionState.denied
-                ? 'Local Network access is required before scanning. Allow it in iPhone Settings > ShadowPlay, then try again.'
+                ? 'Local Network access is required before scanning. Allow it in iPhone Settings > Kivo, then try again.'
                 : 'Local Network access is not available yet. Connect to Wi‑Fi and try again.';
           });
         }

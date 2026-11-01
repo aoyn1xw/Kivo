@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:shadowplay/app/app.dart';
-import 'package:shadowplay/core/app_state.dart';
-import 'package:shadowplay/core/models.dart';
-import 'package:shadowplay/features/clips/clips_screen.dart';
-import 'package:shadowplay/features/shell/main_shell.dart';
+import 'package:kivo/app/app.dart';
+import 'package:kivo/core/app_state.dart';
+import 'package:kivo/core/models.dart';
+import 'package:kivo/features/clips/clips_screen.dart';
+import 'package:kivo/features/shell/main_shell.dart';
 
 void main() {
   setUp(() {
@@ -17,7 +17,7 @@ void main() {
       (tester) async {
     final preferences = await SharedPreferences.getInstance();
     final state = AppState.forTesting(preferences);
-    await tester.pumpWidget(ShadowPlayApp(state: state));
+    await tester.pumpWidget(KivoApp(state: state));
 
     expect(find.text('Your recordings. On your phone.'), findsOneWidget);
     expect(find.text('Open Camera'), findsNothing);
@@ -150,7 +150,8 @@ void main() {
     expect(find.text('About'), findsOneWidget);
   });
 
-  testWidgets('Home screen displays focused card and View recordings switches tab',
+  testWidgets(
+      'Home screen displays focused card and View recordings switches tab',
       (tester) async {
     final preferences = await SharedPreferences.getInstance();
     final connection = Connection(
@@ -187,7 +188,8 @@ void main() {
     expect(find.text('PC Recordings'), findsOneWidget);
   });
 
-  testWidgets('Delete local copy shows confirmation dialog reassuring original file stays on PC',
+  testWidgets(
+      'Delete local copy shows confirmation dialog reassuring original file stays on PC',
       (tester) async {
     final preferences = await SharedPreferences.getInstance();
     final connection = Connection(
@@ -224,10 +226,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Delete local copy?'), findsOneWidget);
-    expect(find.textContaining('The original recording remains safe on GAMING-PC.'), findsOneWidget);
+    expect(
+        find.textContaining(
+            'The original recording remains safe on GAMING-PC.'),
+        findsOneWidget);
 
     await tester.tap(find.widgetWithText(TextButton, 'Delete'));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pumpAndSettle();
 
     expect(state.downloadedClips, isEmpty);

@@ -1,5 +1,5 @@
-name: shadowplay
-description: Cross-platform ShadowPlay LAN clip client.
+name: kivo
+description: Cross-platform Kivo LAN clip client.
 publish_to: none
 version: 0.1.0+1
 

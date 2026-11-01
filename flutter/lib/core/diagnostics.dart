@@ -162,10 +162,10 @@ final RegExp _pemBlock = RegExp(
 );
 
 final RegExp _bearerScheme =
-    RegExp(r'\bbearer\s+[A-Za-z0-9._~+/\-]{6,}', caseSensitive: false);
+    RegExp(r'\bbearer\s+[A-Za-z0-9._~+\/\-]{6,}', caseSensitive: false);
 
 final RegExp _authHeader = RegExp(
-  r'("(?:proxy[-_ ]?)?authorization"?\s*[:=]\s*"?)[A-Za-z0-9._~+/\-]{6,}',
+  r'("(?:proxy[-_ ]?)?authorization"?\s*[:=]\s*"?)[A-Za-z0-9._~+\/\-]{6,}',
   caseSensitive: false,
 );
 
@@ -176,7 +176,7 @@ final RegExp _pairingCodeValue = RegExp(
 
 final RegExp _tokenValue = RegExp(
   r'(((?:access|api|auth|bearer|pairing|device|session|refresh)[-_ ]?)?'
-  r'token"?\s*[:=]\s*"?)[A-Za-z0-9._~+/\-]{6,}',
+  r'token"?\s*[:=]\s*"?)[A-Za-z0-9._~+\/\-]{6,}',
   caseSensitive: false,
 );
 
@@ -595,9 +595,9 @@ class Diagnostics {
         report.writeln(entry.encode());
       }
     }
-    final temporary = await Directory.systemTemp.createTemp('shadowplay-');
+    final temporary = await Directory.systemTemp.createTemp('kivo-');
     final file =
-        File('${temporary.path}${Platform.pathSeparator}shadowplay-diagnostics-'
+        File('${temporary.path}${Platform.pathSeparator}kivo-diagnostics-'
             '${_clock().millisecondsSinceEpoch}.txt');
     await file.writeAsString(report.toString(), flush: true);
     return file.path;
@@ -605,9 +605,9 @@ class Diagnostics {
 
   void _writeHeader(StringBuffer report) {
     report
-      ..writeln('ShadowPlay Diagnostics Report')
+      ..writeln('Kivo Diagnostics Report')
       ..writeln('generated (UTC): ${_clock().toIso8601String()}')
-      ..writeln('app: ShadowPlay mobile 0.1.0 (1)')
+      ..writeln('app: Kivo mobile 0.1.0 (1)')
       ..writeln(
           'platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}')
       ..writeln('verbose mode: $_verbose');

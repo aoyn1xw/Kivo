@@ -2,13 +2,13 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shadowplay/core/media_gallery.dart';
+import 'package:kivo/core/media_gallery.dart';
 
 void main() {
   test('iOS prepared path is sent to Photos and cleaned up afterwards',
       () async {
     final temporaryDirectory =
-        await Directory.systemTemp.createTemp('shadowplay-gallery-');
+        await Directory.systemTemp.createTemp('kivo-gallery-');
     addTearDown(() => temporaryDirectory.delete(recursive: true));
 
     final originalPath = '${temporaryDirectory.path}/original.mp4';
@@ -35,7 +35,7 @@ void main() {
 
   test('temporary iOS export is cleaned up when Photos save fails', () async {
     final temporaryDirectory =
-        await Directory.systemTemp.createTemp('shadowplay-gallery-');
+        await Directory.systemTemp.createTemp('kivo-gallery-');
     addTearDown(() => temporaryDirectory.delete(recursive: true));
 
     final temporaryPath = '${temporaryDirectory.path}/prepared.mp4';

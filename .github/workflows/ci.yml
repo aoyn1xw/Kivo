@@ -27,30 +27,21 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Restore
-        run: dotnet restore ShadowPlay.sln
+        run: dotnet restore Kivo.sln
 
       - name: Build
-        run: dotnet build ShadowPlay.sln -c Release --no-restore
+        run: dotnet build Kivo.sln -c Release --no-restore
 
       - name: Test
         run: >
-          dotnet test ShadowPlay.sln -c Release --no-build
+          dotnet test Kivo.sln -c Release --no-build
           --collect:"XPlat Code Coverage"
           --results-directory TestResults
-
-      - name: Upload .NET coverage
-        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: codecov/codecov-action@v7
-        with:
-          files: TestResults/**/coverage.cobertura.xml
-          flags: dotnet
-          fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Publish
         run: >
           dotnet publish
-          src/ShadowPlay.Windows/ShadowPlay.Windows.csproj
+          src/Kivo.Windows/Kivo.Windows.csproj
           -c Release
           -r win-x64
           --self-contained false
@@ -75,7 +66,7 @@ jobs:
             $bytes[0..8191]
           )
 
-          $out = & ".\publish\win-x64\ShadowPlay.exe" `
+          $out = & ".\publish\win-x64\Kivo.exe" `
             --smoke `
             --folder $clips `
             --port 0 `
@@ -122,15 +113,6 @@ jobs:
 
       - name: Test
         run: flutter test --coverage
-
-      - name: Upload Flutter coverage
-        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: codecov/codecov-action@v7
-        with:
-          files: flutter/coverage/lcov.info
-          flags: flutter
-          fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
 
   android:
     name: Android build

@@ -1,7 +1,7 @@
-# ShadowPlay Flutter client
+# Kivo Flutter client
 
-This is the cross-platform replacement for the reference client in `../ios/`.
-It implements protocol v1 pairing, QR/manual pairing, secure token storage,
+This is the cross-platform mobile client for Kivo (Android & iOS).
+It implements protocol v1/v2 pairing, QR/manual pairing, secure token storage,
 clip polling, persistent Documents-directory downloads, and local playback.
 Pairing performs a `GET /api/v1/health` preflight before consuming the one-time
 code and reports timeout, refused, unreachable, HTTP, and malformed-response

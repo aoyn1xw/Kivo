@@ -9,6 +9,8 @@ import 'package:http/io_client.dart' as http_io;
 import 'models.dart';
 import 'resumable_download.dart';
 
+typedef KivoApi = ShadowPlayApi;
+
 enum ApiFailureKind {
   timeout,
   connectionRefused,
@@ -150,7 +152,7 @@ class ShadowPlayApi {
             rethrow;
           } catch (error) {
             throw ApiException(
-              'The PC returned an invalid clip list. Restart ShadowPlay and try again.',
+              'The PC returned an invalid clip list. Restart Kivo and try again.',
               kind: ApiFailureKind.malformedResponse,
             );
           }
@@ -176,7 +178,7 @@ class ShadowPlayApi {
           } catch (error) {
             if (error is ApiException) rethrow;
             throw const ApiException(
-              'The PC returned an invalid server response. Restart ShadowPlay and try again.',
+              'The PC returned an invalid server response. Restart Kivo and try again.',
               kind: ApiFailureKind.malformedResponse,
             );
           }
@@ -294,7 +296,7 @@ class ShadowPlayApi {
       } catch (error) {
         if (error is ApiException) rethrow;
         throw ApiException(
-          'The PC returned an invalid health response. Restart ShadowPlay and try again.',
+          'The PC returned an invalid health response. Restart Kivo and try again.',
           kind: ApiFailureKind.malformedResponse,
         );
       }
@@ -344,7 +346,7 @@ class ShadowPlayApi {
       } catch (error) {
         if (error is ApiException) rethrow;
         throw const ApiException(
-          'The PC returned an invalid pairing response. Restart ShadowPlay and try again.',
+          'The PC returned an invalid pairing response. Restart Kivo and try again.',
           kind: ApiFailureKind.malformedResponse,
         );
       }
@@ -444,7 +446,7 @@ class ShadowPlayApi {
       return await request.timeout(timeout);
     } on TimeoutException {
       throw ApiException(
-        'ShadowPlay did not respond at ${uri.host}:${uri.port}. Check that the PC is awake, sharing is running, and both devices are on the same Wi-Fi.',
+        'Kivo did not respond at ${uri.host}:${uri.port}. Check that the PC is awake, sharing is running, and both devices are on the same Wi-Fi.',
         kind: ApiFailureKind.timeout,
       );
     } on SocketException catch (error) {
@@ -462,7 +464,7 @@ class ShadowPlayApi {
 
   static ApiException _tlsError(HandshakeException error, Uri uri) {
     return ApiException(
-      'ShadowPlay could not verify the PC identity over the encrypted link '
+      'Kivo could not verify the PC identity over the encrypted link '
       '(${uri.host}:${uri.port}). The PC certificate may have changed; '
       're-pair the phone from the QR code on the PC.',
       kind: ApiFailureKind.tlsUntrusted,
@@ -479,7 +481,7 @@ class ShadowPlayApi {
         code == 10061 ||
         lower.contains('connection refused')) {
       return ApiException(
-        'The ShadowPlay server is unavailable at ${uri.host}:${uri.port}. Start sharing on the PC and check Windows Firewall.',
+        'The Kivo server is unavailable at ${uri.host}:${uri.port}. Start sharing on the PC and check Windows Firewall.',
         kind: ApiFailureKind.connectionRefused,
       );
     }
@@ -506,7 +508,7 @@ class ShadowPlayApi {
     final apiVersion = (body['apiVersion'] as num?)?.toInt();
     if (apiVersion != null && apiVersion > 1) {
       throw ApiException(
-        'This PC requires a newer ShadowPlay mobile app (API v$apiVersion). Update the phone app and try again.',
+        'This PC requires a newer Kivo mobile app (API v$apiVersion). Update the phone app and try again.',
         kind: ApiFailureKind.apiIncompatible,
       );
     }

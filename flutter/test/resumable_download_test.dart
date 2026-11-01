@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shadowplay/core/models.dart';
-import 'package:shadowplay/core/resumable_download.dart';
-import 'package:shadowplay/core/shadowplay_api.dart';
+import 'package:kivo/core/models.dart';
+import 'package:kivo/core/resumable_download.dart';
+import 'package:kivo/core/shadowplay_api.dart';
 
 /// End-to-end tests for the verified resumable downloader, exercised through
 /// the real `ShadowPlayApi.openDownload` transport against a scripted local
@@ -65,7 +65,7 @@ void main() {
 
   setUp(() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    tempDir = await Directory.systemTemp.createTemp('shadowplay-dl');
+    tempDir = await Directory.systemTemp.createTemp('kivo-dl');
     partFile =
         File('${tempDir.path}${Platform.pathSeparator}aaaaaaaa_test.mp4.part');
     connection = Connection(
