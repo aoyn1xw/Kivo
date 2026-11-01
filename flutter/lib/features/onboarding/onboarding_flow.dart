@@ -287,7 +287,7 @@ class _PairingPageState extends State<_PairingPage> {
       await widget.state.addPaired(
         response,
         _address.text.trim(),
-        tlsPort ?? port,
+        port,
         httpsPort: tlsPort,
         certSha256: pin,
       );
