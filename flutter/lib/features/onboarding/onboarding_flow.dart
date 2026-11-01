@@ -7,6 +7,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../core/app_state.dart';
 import '../../core/app_permissions.dart';
 import '../../core/models.dart';
+import '../../core/pairing_preflight.dart';
 import '../../core/shadowplay_api.dart';
 
 enum _OnboardingStep { intro, permission, pairing, success }
@@ -191,7 +192,8 @@ class _PairingPage extends StatefulWidget {
   State<_PairingPage> createState() => _PairingPageState();
 }
 
-class _PairingPageState extends State<_PairingPage> {
+class _PairingPageState extends State<_PairingPage>
+    with WidgetsBindingObserver {
   final _address = TextEditingController();
   final _port = TextEditingController(text: '5177');
   final _code = TextEditingController();
@@ -204,6 +206,7 @@ class _PairingPageState extends State<_PairingPage> {
   bool _busy = false;
   bool _preflightBusy = false;
   bool _preflightPassed = false;
+  bool _pinRejected = false;
   AppPermissionState _permissionState = AppPermissionState.unknown;
   String? _error;
   final _localNetworkPermissions = const LocalNetworkPermissionService();
@@ -211,6 +214,7 @@ class _PairingPageState extends State<_PairingPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scannerController = MobileScannerController(
       formats: const [BarcodeFormat.qrCode],
       detectionSpeed: DetectionSpeed.noDuplicates,
@@ -219,12 +223,25 @@ class _PairingPageState extends State<_PairingPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _address.dispose();
     _port.dispose();
     _code.dispose();
     _deviceName.dispose();
     _scannerController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        _payload != null &&
+        !_preflightPassed &&
+        !_pinRejected &&
+        !_preflightBusy &&
+        !_busy) {
+      unawaited(_runPreflight());
+    }
   }
 
   void _handleCapture(BarcodeCapture capture) {
@@ -238,6 +255,7 @@ class _PairingPageState extends State<_PairingPage> {
         _scannerController.stop();
         setState(() {
           _payload = payload;
+          _pinRejected = false;
           _scanning = false;
           _preflightPassed = false;
           _permissionState = AppPermissionState.unknown;
@@ -517,6 +535,7 @@ class _PairingPageState extends State<_PairingPage> {
   }
 
   Future<void> _runPreflight() async {
+    if (_preflightBusy || _busy) return;
     final port = int.tryParse(_port.text);
     if (_address.text.trim().isEmpty ||
         port == null ||
@@ -539,8 +558,16 @@ class _PairingPageState extends State<_PairingPage> {
         : null;
     final tlsPort = pin != null ? _payload!.httpsPort : null;
     try {
-      final permission =
-          await _localNetworkPermissions.requestLocalNetworkAccess();
+      final permission = await runPairingPreflight(
+        requestPermission: _localNetworkPermissions.requestLocalNetworkAccess,
+        isActive: () => mounted,
+        checkConnection: () => ShadowPlayApi.health(
+          address: _address.text.trim(),
+          port: tlsPort ?? port,
+          useTls: pin != null,
+          pinnedCertSha256: pin,
+        ),
+      );
       if (permission != AppPermissionState.granted) {
         widget.state.diagnostics.warning('pairing',
             'Local Network permission not granted before preflight', {
@@ -559,12 +586,6 @@ class _PairingPageState extends State<_PairingPage> {
       if (mounted) {
         setState(() => _permissionState = AppPermissionState.granted);
       }
-      await ShadowPlayApi.health(
-        address: _address.text.trim(),
-        port: tlsPort ?? port,
-        useTls: pin != null,
-        pinnedCertSha256: pin,
-      );
       widget.state.diagnostics.info('pairing', 'PC reachable for pairing', {
         'address': _address.text.trim(),
         'port': tlsPort ?? port,
@@ -574,6 +595,8 @@ class _PairingPageState extends State<_PairingPage> {
     } catch (error) {
       widget.state.diagnostics.warning('pairing', 'Pairing preflight failed',
           {'address': _address.text.trim(), 'error': error.toString()});
+      _pinRejected =
+          error is ApiException && error.kind == ApiFailureKind.tlsUntrusted;
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _preflightBusy = false);
@@ -587,8 +610,11 @@ class _PairingPageState extends State<_PairingPage> {
       _error = null;
     });
     try {
-      final permission =
-          await _localNetworkPermissions.requestLocalNetworkAccess();
+      final permission = await runPairingPreflight(
+        requestPermission: _localNetworkPermissions.requestLocalNetworkAccess,
+        checkConnection: () async {},
+        isActive: () => mounted,
+      );
       if (permission != AppPermissionState.granted) {
         if (mounted) {
           setState(() {

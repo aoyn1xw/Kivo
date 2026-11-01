@@ -144,6 +144,21 @@ void main() {
     }
   });
 
+  test('permission-denied socket is not a certificate change', () async {
+    final client = MockClient((_) async => throw const SocketException(
+        'Operation not permitted',
+        osError: OSError('Permission denied', 1)));
+    try {
+      await expectLater(
+        ShadowPlayApi(saved, 'test-token').serverInfo(client: client),
+        throwsA(isA<ApiException>()
+            .having((e) => e.kind, 'kind', ApiFailureKind.network)),
+      );
+    } finally {
+      client.close();
+    }
+  });
+
   test('refused socket is not a certificate change', () async {
     final client = MockClient(
         (_) async => throw const SocketException('Connection refused'));
