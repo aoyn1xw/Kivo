@@ -4,17 +4,18 @@ import '../core/app_state.dart';
 import '../features/onboarding/onboarding_flow.dart';
 import '../features/shell/main_shell.dart';
 
-class ShadowPlayApp extends StatefulWidget {
-  const ShadowPlayApp({required this.state, super.key});
+typedef ShadowPlayApp = KivoApp;
+
+class KivoApp extends StatefulWidget {
+  const KivoApp({required this.state, super.key});
 
   final AppState state;
 
   @override
-  State<ShadowPlayApp> createState() => _ShadowPlayAppState();
+  State<KivoApp> createState() => _KivoAppState();
 }
 
-class _ShadowPlayAppState extends State<ShadowPlayApp>
-    with WidgetsBindingObserver {
+class _KivoAppState extends State<KivoApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
@@ -47,7 +48,7 @@ class _ShadowPlayAppState extends State<ShadowPlayApp>
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: widget.state,
         builder: (context, _) => MaterialApp(
-          title: 'ShadowPlay',
+          title: 'Kivo',
           debugShowCheckedModeBanner: false,
           theme: _theme(Brightness.light),
           darkTheme: _theme(Brightness.dark),

@@ -1,14 +1,14 @@
-# ShadowPlay (working title)
+# Kivo
 
 A lightweight Windows tray application that watches your NVIDIA App / GeForce Experience
 recordings folder and serves completed `.mp4` clips to your phone over the local Wi-Fi network.
 A cross-platform Flutter mobile app (Android & iOS) pairs with this desktop app by scanning a QR code and downloads original,
 byte-for-byte recordings.
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/aoyn1xw/ShadowPlay)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/aoyn1xw/Kivo)
 
 > This is an unofficial hobby project and is not affiliated with, endorsed by, or connected
-> to NVIDIA Corporation. "ShadowPlay" is a temporary working title. No NVIDIA assets are used.
+> to NVIDIA Corporation. Kivo (formerly known by the temporary working title "ShadowPlay") uses no NVIDIA assets.
 >
 > **Status:** Windows desktop app (MVP) implemented, plus a cross-platform Flutter mobile client
 > under [`flutter/`](flutter/README.md).
@@ -30,7 +30,7 @@ byte-for-byte recordings.
   downloads. Phones paired via a v2 QR code use the **certificate-pinned HTTPS** listener
   (`https://<pc-ip>:<httpsPort>`); there is no silent HTTP/HTTPS downgrade.
 - Pairs phones via a one-time QR pairing code; paired devices authenticate with bearer
-  tokens (only token *hashes* are stored) and can be revoked at any time.
+  tokens (only token _hashes_ are stored) and can be revoked at any time.
 - **Never** uploads, edits, deletes, re-encodes, or moves your recordings. It only reads them.
 
 ---
@@ -39,14 +39,14 @@ byte-for-byte recordings.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  ShadowPlay.Windows (WPF, net8.0-windows)                        │
+│  Kivo.Windows (WPF, net8.0-windows)                              │
 │  • Tray icon (WinForms NotifyIcon), setup + main windows         │
 │  • AppController: starts/stops sharing, owns pairing offers      │
 │  • Generic Host + Microsoft.Extensions.DependencyInjection       │
 └───────────────┬──────────────────────────────────┬───────────────┘
                 │                                  │
 ┌───────────────▼───────────────┐   ┌──────────────▼───────────────┐
-│  ShadowPlay.Api (net8.0)      │   │  ShadowPlay.Core (net8.0)    │
+│  Kivo.Api (net8.0)            │   │  Kivo.Core (net8.0)          │
 │  • Minimal APIs on Kestrel    │   │  • Clip monitor (FSW + polls │
 │  • Bearer-token auth          │◄──┤    + reconciliation)          │
 │  • Private-network guard      │   │  • Pairing & device registry │
@@ -55,8 +55,8 @@ byte-for-byte recordings.
                 ▲
                 │ tested by
      ┌──────────┴──────────┐
-     │  ShadowPlay.Tests   │   xUnit; temp folders + fake clocks;
-     │  (85 tests)         │   real Kestrel on port 0 for API tests
+     │  Kivo.Tests         │   xUnit; temp folders + fake clocks;
+     │  (120 tests)        │   real Kestrel on port 0 for API tests
      └─────────────────────┘
 ```
 
@@ -69,14 +69,14 @@ Key decisions:
   reconciles the in-memory catalog so missed watcher events self-heal.
 - **The API layer is transport-agnostic** (`LanApiFactory`): swapping plain HTTP for pinned
   local HTTPS later touches one file, not endpoint logic.
-- **Settings** live under `%LocalAppData%\ShadowPlay\settings.json` (atomic writes);
+- **Settings** live under `%LocalAppData%\ShadowPlay\settings.json` (atomic writes; path preserved for upgrade compatibility);
   logs under `%LocalAppData%\ShadowPlay\logs` (rotating, size-capped).
 
 ## Requirements
 
 - Windows 10/11 x64
 - .NET SDK **8.0** (LTS) to build — see `global.json`
-- To *run* the published app: [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
+- To _run_ the published app: [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
   **and** the ASP.NET Core 8 Runtime
 - No NVIDIA software is required to build or test
 - To build the Flutter mobile client: Flutter **3.47.2** and Java **17**
@@ -88,22 +88,22 @@ Key decisions:
 
 ```powershell
 # restore
-dotnet restore ShadowPlay.sln
+dotnet restore Kivo.sln
 
 # build (Debug or Release)
-dotnet build ShadowPlay.sln -c Release
+dotnet build Kivo.sln -c Release
 
 # run all automated tests
-dotnet test ShadowPlay.sln -c Release
+dotnet test Kivo.sln -c Release
 
 # format check
-dotnet format ShadowPlay.sln --verify-no-changes
+dotnet format Kivo.sln --verify-no-changes
 ```
 
 Run from source:
 
 ```powershell
-dotnet run --project src/ShadowPlay.Windows -c Release
+dotnet run --project src/Kivo.Windows -c Release
 ```
 
 First launch shows the setup window: pick your recordings folder, validate, done. The app
@@ -117,13 +117,13 @@ Any normal folder works — no NVIDIA software needed:
 ```powershell
 mkdir C:\temp\fake-clips
 # drop any .mp4 files in there (subfolders are scanned too)
-dotnet run --project src/ShadowPlay.Windows -c Release   # choose C:\temp\fake-clips in setup
+dotnet run --project src/Kivo.Windows -c Release   # choose C:\temp\fake-clips in setup
 ```
 
 For an unattended headless check (no UI):
 
 ```powershell
-publish\ShadowPlay.exe --smoke --folder C:\temp\fake-clips --port 0 --smoke-seconds 12
+publish\Kivo.exe --smoke --folder C:\temp\fake-clips --port 0 --smoke-seconds 12
 # prints SMOKE_OK {port} once healthy, then SMOKE_CLIPS {count}
 ```
 
@@ -131,15 +131,15 @@ Note: newly added files appear after ~6–9 seconds (stability window), by desig
 
 ## Local API summary (`http://<pc-ip>:5177/api/v1`; TLS: `https://<pc-ip>:<httpsPort>/api/v1`)
 
-| Endpoint | Auth | Description |
-|---|---|---|
-| `GET /health` | none | Liveness + server id (used pre-pairing) |
-| `POST /pair/exchange` | pairing code | Swap a one-time code for a bearer token |
-| `GET /server` | bearer | Server identity + clip count |
-| `GET /clips` | bearer | Clip metadata, newest first |
-| `GET /clips/{id}` | bearer | Single clip metadata |
-| `GET /clips/{id}/download` | bearer | Streamed `video/mp4`, supports `Range` |
-| `GET /clips/{id}/thumbnail` | bearer | Authenticated JPEG preview when available |
+| Endpoint                    | Auth         | Description                               |
+| --------------------------- | ------------ | ----------------------------------------- |
+| `GET /health`               | none         | Liveness + server id (used pre-pairing)   |
+| `POST /pair/exchange`       | pairing code | Swap a one-time code for a bearer token   |
+| `GET /server`               | bearer       | Server identity + clip count              |
+| `GET /clips`                | bearer       | Clip metadata, newest first               |
+| `GET /clips/{id}`           | bearer       | Single clip metadata                      |
+| `GET /clips/{id}/download`  | bearer       | Streamed `video/mp4`, supports `Range`    |
+| `GET /clips/{id}/thumbnail` | bearer       | Authenticated JPEG preview when available |
 
 Errors: `400` malformed request, `401` missing/bad token, `403` non-private client IP,
 `404` unknown id/route, `409` invalid/expired/reused pairing code, `500` unexpected.
@@ -178,10 +178,16 @@ curl http://192.168.1.20:5177/api/v1/pair/exchange \
 {
   "token": "k3Xc…(base64url, shown once)",
   "deviceId": "f2a9…",
-  "server": { "serverId": "b0c1…", "computerName": "GAMING-PC", "protocolVersion": 2,
-    "serverVersion": "0.1.0", "apiVersion": 1,
+  "server": {
+    "serverId": "b0c1…",
+    "computerName": "GAMING-PC",
+    "protocolVersion": 2,
+    "serverVersion": "0.1.0",
+    "apiVersion": 1,
     "capabilities": ["clips.rangePlayback", "clips.duration", "clips.thumbnails"],
-    "httpsPort": 5178, "httpsCertSha256": "A1B2..." }
+    "httpsPort": 5178,
+    "httpsCertSha256": "A1B2..."
+  }
 }
 ```
 
@@ -205,7 +211,7 @@ accepted on both transports because authentication is connection-based:
 
 ```bash
 # HTTPS with the certificate the phone pinned at pairing time
-curl --cacert shadowplay.pem -H "Authorization: Bearer $TOKEN" \
+curl --cacert kivo.pem -H "Authorization: Bearer $TOKEN" \
      -o clip.mp4 https://192.168.1.20:5178/api/v1/clips/<id>/download
 ```
 
@@ -216,11 +222,16 @@ in-app playback streams only from a previously downloaded local copy, while down
 resume work over HTTPS like any other request.
 
 Clip metadata shape (no paths are ever exposed):
+
 ```json
-{ "id": "3F2A…64 hex chars", "fileName": "Valorant_2026-08-24.mp4",
-  "sizeBytes": 482110412, "lastWriteTimeUtc": "2026-08-24T18:22:31Z",
+{
+  "id": "3F2A…64 hex chars",
+  "fileName": "Valorant_2026-08-24.mp4",
+  "sizeBytes": 482110412,
+  "lastWriteTimeUtc": "2026-08-24T18:22:31Z",
   "durationMilliseconds": 18400,
-  "thumbnailUrl": "/api/v1/clips/<id>/thumbnail" }
+  "thumbnailUrl": "/api/v1/clips/<id>/thumbnail"
+}
 ```
 
 The `lastWriteTimeUtc` field is the recording timestamp used by the desktop
@@ -236,7 +247,8 @@ shipped, and runs a **certificate-pinned HTTPS listener alongside it** for phone
 via a v2 QR:
 
 - The desktop app generates (once) and reuses a self-signed **ECDSA P-256** certificate in the
-  current user's certificate store (`CN=ShadowPlay Local`), covering every current LAN address.
+  current user's certificate store (`CN=ShadowPlay Local`, preserved for compatibility with existing
+  certificate pins), covering every current LAN address.
   Phones pin its **SHA-256 fingerprint** from the QR at pairing time; later connections only
   succeed when the presented certificate matches (or they fail to connect, with no silent
   fallback to HTTP).
@@ -258,9 +270,9 @@ On the legacy plain HTTP transport (still enabled for the bootstrap/legacy path)
   port (HTTP and HTTPS). From the main window, **Allow private LAN access** can create/update
   those rules after an administrator confirmation, and the update also deletes the legacy
   single-port rule so no stale port stays open. The rules are limited to the Private profile;
-  ShadowPlay never disables Windows Firewall or opens the Public profile. Mark the active
+  Kivo never disables Windows Firewall or opens the Public profile. Mark the active
   Wi-Fi network Private in Windows before pairing. A firewall rule for an older copy of
-  `ShadowPlay.exe` does not authorize a new install path.
+  `Kivo.exe` (or `ShadowPlay.exe`) does not authorize a new install path.
 
 Pinned HTTPS is implemented (see above): dual HTTP+TLS listeners in `LanApiFactory`, a QR v2
 payload carrying `httpsPort`/`certSha256`, and per-port private-profile firewall rules.
@@ -272,9 +284,9 @@ need a separate .NET runtime. Install Inno Setup 6, choose a release version, th
 commands from the repository root:
 
 ```powershell
-dotnet restore src/ShadowPlay.Windows/ShadowPlay.Windows.csproj -r win-x64
+dotnet restore src/Kivo.Windows/Kivo.Windows.csproj -r win-x64
 $version = "0.1.0"
-dotnet publish src/ShadowPlay.Windows/ShadowPlay.Windows.csproj `
+dotnet publish src/Kivo.Windows/Kivo.Windows.csproj `
   -c Release -r win-x64 --self-contained true --no-restore `
   -p:Version=$version -o publish/win-x64
 $iscc = @(
@@ -282,11 +294,11 @@ $iscc = @(
   "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
   "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-& $iscc "/DMyAppVersion=$version" installer\ShadowPlay.iss
+& $iscc "/DMyAppVersion=$version" installer\Kivo.iss
 ```
 
-The finished installer is `artifacts\installer\ShadowPlay-Setup-0.1.0.exe`. It installs per
-machine into `C:\Program Files\ShadowPlay`, creates a Start Menu shortcut, offers an optional
+The finished installer is `artifacts\installer\Kivo-Setup-0.1.0.exe`. It installs per
+machine into `C:\Program Files\Kivo`, creates a Start Menu shortcut, offers an optional
 desktop shortcut, and registers its uninstaller with Windows. Reinstalling with the same stable
 installer identity upgrades the existing installation. Uninstall preserves `%LocalAppData%\ShadowPlay`
 unless the user explicitly chooses to remove settings, pairing information, logs, and cached
@@ -297,14 +309,14 @@ previews.
 Framework-dependent (small; requires .NET 8 runtimes installed on target):
 
 ```powershell
-dotnet publish src/ShadowPlay.Windows -c Release -r win-x64 --self-contained false -o publish
-publish\ShadowPlay.exe
+dotnet publish src/Kivo.Windows -c Release -r win-x64 --self-contained false -o publish
+publish\Kivo.exe
 ```
 
 Fully self-contained single-file alternative:
 
 ```powershell
-dotnet publish src/ShadowPlay.Windows -c Release -r win-x64 --self-contained true ^
+dotnet publish src/Kivo.Windows -c Release -r win-x64 --self-contained true ^
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish-single
 ```
 
@@ -331,13 +343,13 @@ configuration; configure a release keystore separately before treating that APK 
 
 ## Data locations
 
-| What | Where |
-|---|---|
-| Settings + device registry | `%LocalAppData%\ShadowPlay\settings.json` |
-| Logs (rotating, ≤512 KB × 4) | `%LocalAppData%\ShadowPlay\logs\shadowplay.log` |
-| Recordings | untouched, wherever you pointed the app |
+| What                                                            | Where                                                                                                                   |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Settings + device registry                                      | `%LocalAppData%\ShadowPlay\settings.json`                                                                               |
+| Logs (rotating, ≤512 KB × 4)                                    | `%LocalAppData%\ShadowPlay\logs\shadowplay.log`                                                                         |
+| Recordings                                                      | untouched, wherever you pointed the app                                                                                 |
 | Mobile diagnostics logs (rotating, ≤10 MB total across 2 files) | App documents `diagnostics/` folder (`flutter/` client; see [Mobile diagnostics](#mobile-diagnostics--troubleshooting)) |
-| iOS high-frame-rate Photos export notes (DEBUG builds) | App documents `ShadowPlayDiagnostics/` folder |
+| iOS high-frame-rate Photos export notes (DEBUG builds)          | App documents `ShadowPlayDiagnostics/` folder                                                                           |
 
 ## Out of scope (for now)
 
@@ -350,13 +362,13 @@ configuration; configure a release keystore separately before treating that APK 
 ## Repository layout
 
 ```
-ShadowPlay.sln
+Kivo.sln
 src/
-  ShadowPlay.Windows/   WPF app, tray, settings dialog, controller, DI composition, smoke mode
-  ShadowPlay.Api/       LAN minimal API (auth, ranges, private-net guard)
-  ShadowPlay.Core/      Monitoring, pairing, devices, settings (UI-free, testable)
+  Kivo.Windows/         WPF app, tray, settings dialog, controller, DI composition, smoke mode
+  Kivo.Api/             LAN minimal API (auth, ranges, private-net guard)
+  Kivo.Core/            Monitoring, pairing, devices, settings (UI-free, testable)
 tests/
-  ShadowPlay.Tests/     xUnit suite (folder validation, completion detection, debouncing,
+  Kivo.Tests/           xUnit suite (folder validation, completion detection, debouncing,
                         reconciliation, stable ids, traversal, pairing expiry/single-use,
                         token validation/revocation, API auth/listing/range downloads,
                         pinned HTTPS end-to-end, QR payload contract, firewall rule script)
@@ -390,8 +402,8 @@ itself is never logged), network (refresh success/failure, PC reachability), dow
 severity (`debug`/`info`/`warn`/`error`) and a component name (`app`, `pairing`,
 `network`, `download`, `playback`, `gallery`, `library`, `diagnostics`).
 
-**Normal vs verbose mode** — normal mode records info/warn/error. The *Verbose
-diagnostics* switch in `Settings → Diagnostics` also records `debug` events
+**Normal vs verbose mode** — normal mode records info/warn/error. The _Verbose
+diagnostics_ switch in `Settings → Diagnostics` also records `debug` events
 (progress checkpoints, lifecycle transitions, PC reachability) and keeps that
 setting across restarts.
 
@@ -405,10 +417,10 @@ keys (token, pairing code, password, …) are dropped entirely.
 
 **File locations**
 
-| Platform | Location |
-|---|---|
-| iOS | App-sandbox `Documents/diagnostics/` — visible only inside the app or via Xcode; the sandbox is not exposed through the Files app |
-| Android | App-private storage — `/data/user/0/com.ayon1xw.shadowplay/app_flutter/diagnostics/` (needs `adb shell run-as` on debug builds) |
+| Platform | Location                                                                                                                          |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| iOS      | App-sandbox `Documents/diagnostics/` — visible only inside the app or via Xcode; the sandbox is not exposed through the Files app |
+| Android  | App-private storage — `/data/user/0/com.ayon1xw.shadowplay/app_flutter/diagnostics/` (needs `adb shell run-as` on debug builds)   |
 
 Two files rotate (`diagnostics.log`, `diagnostics.1.log`) under a 10 MB total
 default (adjustable at attach time); when the current file reaches half the
@@ -416,24 +428,23 @@ budget it is renamed to the archive and the previous archive is deleted.
 
 **In-app tools** (`Settings → Diagnostics`):
 
-- *View recent events* — newest-first list; tap an entry for full details.
-- *Export report* (share icon) — builds a text report (header with mode/storage,
+- _View recent events_ — newest-first list; tap an entry for full details.
+- _Export report_ (share icon) — builds a text report (header with mode/storage,
   both files' newest content, and on iOS the newest
   `ShadowPlayDiagnostics/*.txt` high-frame-rate Photos-export notes) and opens
   the native share sheet. That share is the only way data leaves the device.
-- *Clear logs* (trash icon) — deletes both files and the in-memory view;
+- _Clear logs_ (trash icon) — deletes both files and the in-memory view;
   logging continues afterwards with a fresh file.
 - If file storage is unavailable (rare), the app buffers in memory for the
   session and says so in the report header.
 
 **Troubleshooting quick reference**
 
-| Symptom | Where to look |
-|---|---|
-| Clip never appears | `network` events: refresh failures, then the `download` events for the transfer or error text |
+| Symptom                           | Where to look                                                                                                                      |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Clip never appears                | `network` events: refresh failures, then the `download` events for the transfer or error text                                      |
 | Downloads stall or break mid-file | `download` events: progress checkpoints stall at N% → server/PC side; repeated `Download failed` errors include the failure reason |
-| Playback shows an error | `playback` `Player failed to initialize` events carry the player error |
-| "Save to Photos" missing the clip | `gallery` events: permission denied vs save failed |
-| Pairing loop | `pairing` events: preflight failures (address/port/transport), permission state, or a certificate-pin mismatch refusal |
-| To hand logs to support | Settings → Diagnostics → export → share via email/ AirDrop/… ; attach the exported `.txt` |
-
+| Playback shows an error           | `playback` `Player failed to initialize` events carry the player error                                                             |
+| "Save to Photos" missing the clip | `gallery` events: permission denied vs save failed                                                                                 |
+| Pairing loop                      | `pairing` events: preflight failures (address/port/transport), permission state, or a certificate-pin mismatch refusal             |
+| To hand logs to support           | Settings → Diagnostics → export → share via email/ AirDrop/… ; attach the exported `.txt`                                          |

@@ -6,10 +6,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:shadowplay/core/app_state.dart';
-import 'package:shadowplay/core/media_gallery.dart';
-import 'package:shadowplay/core/models.dart';
-import 'package:shadowplay/core/shadowplay_api.dart';
+import 'package:kivo/core/app_state.dart';
+import 'package:kivo/core/media_gallery.dart';
+import 'package:kivo/core/models.dart';
+import 'package:kivo/core/shadowplay_api.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

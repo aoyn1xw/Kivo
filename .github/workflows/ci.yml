@@ -27,14 +27,14 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Restore
-        run: dotnet restore ShadowPlay.sln
+        run: dotnet restore Kivo.sln
 
       - name: Build
-        run: dotnet build ShadowPlay.sln -c Release --no-restore
+        run: dotnet build Kivo.sln -c Release --no-restore
 
       - name: Test
         run: >
-          dotnet test ShadowPlay.sln -c Release --no-build
+          dotnet test Kivo.sln -c Release --no-build
           --collect:"XPlat Code Coverage"
           --results-directory TestResults
 
@@ -50,7 +50,7 @@ jobs:
       - name: Publish
         run: >
           dotnet publish
-          src/ShadowPlay.Windows/ShadowPlay.Windows.csproj
+          src/Kivo.Windows/Kivo.Windows.csproj
           -c Release
           -r win-x64
           --self-contained false
@@ -75,7 +75,7 @@ jobs:
             $bytes[0..8191]
           )
 
-          $out = & ".\publish\win-x64\ShadowPlay.exe" `
+          $out = & ".\publish\win-x64\Kivo.exe" `
             --smoke `
             --folder $clips `
             --port 0 `

@@ -3,10 +3,10 @@ version: 2
 updates:
   - package-ecosystem: "nuget"
     directories:
-      - "/src/ShadowPlay.Api"
-      - "/src/ShadowPlay.Core"
-      - "/src/ShadowPlay.Windows"
-      - "/tests/ShadowPlay.Tests"
+      - "/src/Kivo.Api"
+      - "/src/Kivo.Core"
+      - "/src/Kivo.Windows"
+      - "/tests/Kivo.Tests"
     schedule:
       interval: "weekly"
     groups:

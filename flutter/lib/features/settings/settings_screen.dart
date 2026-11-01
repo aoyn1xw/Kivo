@@ -131,7 +131,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               leading: const Icon(Icons.computer_outlined),
               title: Text(server.computerName),
               subtitle: Text(
-                'ShadowPlay ${server.serverVersion ?? 'version unavailable'} · API v${server.apiVersion}',
+                'Kivo ${server.serverVersion ?? 'version unavailable'} · API v${server.apiVersion}',
               ),
             ),
           ],
@@ -232,7 +232,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const _SectionLabel('About'),
           const ListTile(
             leading: Icon(Icons.info_outline),
-            title: Text('ShadowPlay'),
+            title: Text('Kivo'),
             subtitle: Text('Version 0.1.0 (1)'),
           ),
           ListTile(
@@ -241,12 +241,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => showAboutDialog(
               context: context,
-              applicationName: 'ShadowPlay',
+              applicationName: 'Kivo',
               applicationVersion: '0.1.0 (1)',
               children: const [
                 SizedBox(height: 12),
                 Text(
-                  'Local Wi-Fi transfer only. ShadowPlay transfers original game recordings directly between your PC and phone without cloud servers, accounts, or internet uploads.',
+                  'Local Wi-Fi transfer only. Kivo transfers original game recordings directly between your PC and phone without cloud servers, accounts, or internet uploads.',
                 ),
               ],
             ),

@@ -48,24 +48,24 @@ jobs:
             }
           }
 
-          "SHADOWPLAY_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "KIVO_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Restore
         run: >
           dotnet restore
-          src/ShadowPlay.Windows/ShadowPlay.Windows.csproj
+          src/Kivo.Windows/Kivo.Windows.csproj
           -r win-x64
 
       - name: Build and publish Windows x64
         run: >
           dotnet publish
-          src/ShadowPlay.Windows/ShadowPlay.Windows.csproj
+          src/Kivo.Windows/Kivo.Windows.csproj
           -c Release
           -r win-x64
           --self-contained true
           --no-restore
-          -p:Version=$env:SHADOWPLAY_VERSION
+          -p:Version=$env:KIVO_VERSION
           -o publish/win-x64
 
       - name: Compile Windows installer
@@ -81,7 +81,7 @@ jobs:
             throw "Inno Setup Compiler (ISCC.exe) was not found on the runner."
           }
 
-          & $iscc "/DMyAppVersion=$env:SHADOWPLAY_VERSION" "installer\ShadowPlay.iss"
+          & $iscc "/DMyAppVersion=$env:KIVO_VERSION" "installer\Kivo.iss"
 
           if ($LASTEXITCODE -ne 0) {
             throw "Inno Setup failed with exit code $LASTEXITCODE."
@@ -90,8 +90,8 @@ jobs:
       - name: Verify Windows installer
         shell: pwsh
         run: |
-          $installer = "artifacts\installer\ShadowPlay-Setup-$env:SHADOWPLAY_VERSION.exe"
-          $publishedExe = "publish\win-x64\ShadowPlay.exe"
+          $installer = "artifacts\installer\Kivo-Setup-$env:KIVO_VERSION.exe"
+          $publishedExe = "publish\win-x64\Kivo.exe"
 
           if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
             throw "Expected installer was not created: $installer"
@@ -111,12 +111,12 @@ jobs:
           $appVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($publishedExe).ProductVersion.Trim()
           $installerVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($installer).ProductVersion.Trim()
 
-          if (-not $appVersion.StartsWith($env:SHADOWPLAY_VERSION, [StringComparison]::Ordinal)) {
-            throw "Published app version '$appVersion' does not match '$env:SHADOWPLAY_VERSION'."
+          if (-not $appVersion.StartsWith($env:KIVO_VERSION, [StringComparison]::Ordinal)) {
+            throw "Published app version '$appVersion' does not match '$env:KIVO_VERSION'."
           }
 
-          if ($installerVersion -ne $env:SHADOWPLAY_VERSION) {
-            throw "Installer version '$installerVersion' does not match '$env:SHADOWPLAY_VERSION'."
+          if ($installerVersion -ne $env:KIVO_VERSION) {
+            throw "Installer version '$installerVersion' does not match '$env:KIVO_VERSION'."
           }
 
           Write-Host "Verified installer: $($file.Name) ($($file.Length) bytes), version $installerVersion"
@@ -124,8 +124,8 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v7
         with:
-          name: ShadowPlay-Windows-installer
-          path: artifacts/installer/ShadowPlay-Setup-*.exe
+          name: Kivo-Windows-installer
+          path: artifacts/installer/Kivo-Setup-*.exe
           if-no-files-found: error
 
   android:
@@ -185,7 +185,7 @@ jobs:
       - name: Download Windows build
         uses: actions/download-artifact@v8
         with:
-          name: ShadowPlay-Windows-installer
+          name: Kivo-Windows-installer
           path: release-assets/windows
 
       - name: Download Android build
@@ -201,7 +201,7 @@ jobs:
 
           mkdir -p dist
 
-          WINDOWS_INSTALLER="$(find release-assets/windows -maxdepth 1 -type f -name 'ShadowPlay-Setup-*.exe' | head -n 1)"
+          WINDOWS_INSTALLER="$(find release-assets/windows -maxdepth 1 -type f -name 'Kivo-Setup-*.exe' | head -n 1)"
           if [ -z "$WINDOWS_INSTALLER" ]; then
             echo "::error::Windows installer not found"
             exit 1
@@ -215,7 +215,7 @@ jobs:
             exit 1
           fi
 
-          cp "$APK_FILE" dist/ShadowPlay-Android.apk
+          cp "$APK_FILE" dist/Kivo-Android.apk
           ls -lh dist
 
       - name: Preserve iOS asset and replace rolling release
@@ -228,12 +228,19 @@ jobs:
           set -euo pipefail
 
           if gh release view latest >/dev/null 2>&1; then
-            if gh release view latest --json assets --jq '.assets[].name' | grep -Fxq 'ShadowPlay.ipa'; then
+            if gh release view latest --json assets --jq '.assets[].name' | grep -Fxq 'Kivo.ipa'; then
+              gh release download latest \
+                --pattern 'Kivo.ipa' \
+                --dir dist
+
+              test -s dist/Kivo.ipa
+            elif gh release view latest --json assets --jq '.assets[].name' | grep -Fxq 'ShadowPlay.ipa'; then
               gh release download latest \
                 --pattern 'ShadowPlay.ipa' \
                 --dir dist
 
-              test -s dist/ShadowPlay.ipa
+              mv dist/ShadowPlay.ipa dist/Kivo.ipa
+              test -s dist/Kivo.ipa
             fi
 
             gh release delete latest --cleanup-tag --yes
@@ -253,15 +260,15 @@ jobs:
           preserve_order: true
           tag_name: latest
           target_commitish: ${{ github.sha }}
-          name: ShadowPlay (Latest Build)
+          name: Kivo (Latest Build)
           body: |
             Automated latest build from `main` commit `${{ github.sha }}`.
 
             ## Downloads
 
-            - **Windows Desktop:** `ShadowPlay-Setup-${{ needs.windows.outputs.version }}.exe`
-            - **Android:** `ShadowPlay-Android.apk`
-            - **iOS OTA / Ad Hoc:** `ShadowPlay.ipa`
+            - **Windows Desktop:** `Kivo-Setup-${{ needs.windows.outputs.version }}.exe`
+            - **Android:** `Kivo-Android.apk`
+            - **iOS OTA / Ad Hoc:** `Kivo.ipa`
 
             The signed iOS build can only be installed on devices included in its provisioning profile.
           draft: false
@@ -281,14 +288,16 @@ jobs:
           ASSETS="$(gh release view latest --json assets --jq '.assets[].name')"
           printf '%s\n' "$ASSETS"
 
-          grep -Fxq "ShadowPlay-Setup-${{ needs.windows.outputs.version }}.exe" <<<"$ASSETS"
-          grep -Fxq "ShadowPlay-Android.apk" <<<"$ASSETS"
+          grep -Fxq "Kivo-Setup-${{ needs.windows.outputs.version }}.exe" <<<"$ASSETS"
+          grep -Fxq "Kivo-Android.apk" <<<"$ASSETS"
 
-          if [ -f dist/ShadowPlay.ipa ]; then
-            grep -Fxq "ShadowPlay.ipa" <<<"$ASSETS"
+          if [ -f dist/Kivo.ipa ]; then
+            grep -Fxq "Kivo.ipa" <<<"$ASSETS"
           fi
 
-          if grep -Fxq "ShadowPlay-win-x64.zip" <<<"$ASSETS" || \
+          if grep -Fxq "Kivo-win-x64.zip" <<<"$ASSETS" || \
+             grep -Fxq "Kivo-Android-debug.apk" <<<"$ASSETS" || \
+             grep -Fxq "ShadowPlay-win-x64.zip" <<<"$ASSETS" || \
              grep -Fxq "ShadowPlay-Android-debug.apk" <<<"$ASSETS"; then
             echo "::error::The rolling release still contains superseded assets"
             exit 1

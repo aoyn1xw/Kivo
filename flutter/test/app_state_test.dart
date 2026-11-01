@@ -5,9 +5,9 @@ import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:shadowplay/core/app_state.dart';
-import 'package:shadowplay/core/models.dart';
-import 'package:shadowplay/core/shadowplay_api.dart';
+import 'package:kivo/core/app_state.dart';
+import 'package:kivo/core/models.dart';
+import 'package:kivo/core/shadowplay_api.dart';
 
 /// Race-condition and pairing-trust tests for [AppState], using two real
 /// HTTP servers that stand in for paired PCs so tokens, responses, and

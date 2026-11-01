@@ -11,10 +11,10 @@ Future<void> main() async {
   // Diagnostics buffer in memory from the first line; file storage attaches
   // once the platform directory is known. Nothing is uploaded anywhere.
   final diagnostics = Diagnostics();
-  diagnostics.info('app', 'ShadowPlay starting', {
+  diagnostics.info('app', 'Kivo starting', {
     'platform': Platform.operatingSystem,
     'locale': Platform.localeName,
   });
   await diagnostics.attachDefault();
-  runApp(ShadowPlayApp(state: await AppState.load(diagnostics: diagnostics)));
+  runApp(KivoApp(state: await AppState.load(diagnostics: diagnostics)));
 }

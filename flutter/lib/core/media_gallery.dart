@@ -29,10 +29,10 @@ class GallerySaveException implements Exception {
   String toString() => message;
 }
 
-/// Saves videos to a ShadowPlay album on iOS Photos or Android Gallery.
+/// Saves videos to a Kivo album on iOS Photos or Android Gallery.
 class GalMediaGallery implements MediaGallery {
   const GalMediaGallery({
-    this.album = 'ShadowPlay',
+    this.album = 'Kivo',
     this.iosVideoPreparer,
     this.videoSaver,
     this.accessCheck,

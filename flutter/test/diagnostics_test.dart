@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:shadowplay/core/app_state.dart';
-import 'package:shadowplay/core/diagnostics.dart';
-import 'package:shadowplay/features/settings/diagnostics_screen.dart';
+import 'package:kivo/core/app_state.dart';
+import 'package:kivo/core/diagnostics.dart';
+import 'package:kivo/features/settings/diagnostics_screen.dart';
 
 /// Tests for the local diagnostics logger: redaction guarantees, verbose vs
 /// normal modes, rotating file storage under a bounded budget, export report
@@ -205,7 +205,7 @@ void main() {
     late Directory temp;
 
     setUp(() {
-      temp = Directory.systemTemp.createTempSync('shadowplay-diag-test-');
+      temp = Directory.systemTemp.createTempSync('kivo-diag-test-');
     });
 
     tearDown(() {
@@ -335,7 +335,7 @@ void main() {
     late Directory temp;
 
     setUp(() {
-      temp = Directory.systemTemp.createTempSync('shadowplay-diag-test-');
+      temp = Directory.systemTemp.createTempSync('kivo-diag-test-');
     });
 
     tearDown(() {
@@ -362,7 +362,7 @@ void main() {
       diag.info('export', 'exported-event-67', {'fileName': 'clip.mp4'});
       await diag.flush();
       final report = await exportAndRead(diag);
-      expect(report, startsWith('ShadowPlay Diagnostics Report'));
+      expect(report, startsWith('Kivo Diagnostics Report'));
       expect(report, contains('verbose mode: false'));
       expect(report, contains('== Current log file =='));
       expect(report, contains('"m":"exported-event-67"'));
@@ -379,7 +379,7 @@ void main() {
       final report = await exportAndRead(diag);
       expect(report, contains('file storage unavailable'));
       expect(report, contains('"m":"memory-only-event-91"'));
-      expect(report, startsWith('ShadowPlay Diagnostics Report'));
+      expect(report, startsWith('Kivo Diagnostics Report'));
     });
 
     test('high-frame-rate Photos export reports are appended', () async {

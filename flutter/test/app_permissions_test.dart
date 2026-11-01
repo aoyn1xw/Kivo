@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shadowplay/core/app_permissions.dart';
+import 'package:kivo/core/app_permissions.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
