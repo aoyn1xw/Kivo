@@ -5,7 +5,7 @@ recordings folder and serves completed `.mp4` clips to your phone over the local
 A cross-platform Flutter mobile app (Android & iOS) pairs with this desktop app by scanning a QR code and downloads original,
 byte-for-byte recordings.
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/aoyn1xw/Kivo)
+[Ask DeepWiki about Kivo](https://deepwiki.com/aoyn1xw/Kivo)
 
 > This is an unofficial hobby project and is not affiliated with, endorsed by, or connected
 > to NVIDIA Corporation. Kivo (formerly known by the temporary working title "ShadowPlay") uses no NVIDIA assets.
