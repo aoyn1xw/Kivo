@@ -14,6 +14,7 @@ public sealed class SetupViewModel : ObservableObject
     private string _folderPath = "";
     private string? _message;
     private Brush _messageBrush = Brushes.Gray;
+    private bool _isValid;
 
     public SetupViewModel(IFolderValidator validator, string? initialFolder)
     {
@@ -38,7 +39,7 @@ public sealed class SetupViewModel : ObservableObject
 
     public Brush MessageBrush { get => _messageBrush; private set => SetProperty(ref _messageBrush, value); }
 
-    public bool IsValid { get; private set; }
+    public bool IsValid { get => _isValid; private set => SetProperty(ref _isValid, value); }
 
     public ICommand BrowseCommand => new RelayCommand(() =>
     {

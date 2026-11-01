@@ -39,7 +39,7 @@
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="Start Kivo"
-                    Command="{Binding ConfirmCommand}"
+                    Click="OnConfirmClick"
                     IsEnabled="{Binding IsValid}"
                     Padding="16,6"
                     FontWeight="SemiBold" />
