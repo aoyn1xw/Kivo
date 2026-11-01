@@ -80,8 +80,11 @@ class ShadowPlayApi {
     required bool useTls,
     String? pinnedCertSha256,
     Duration? connectionTimeout,
+    void Function()? onPinMismatch,
   }) {
-    final inner = HttpClient();
+    final inner = HttpClient(
+      context: useTls ? SecurityContext(withTrustedRoots: false) : null,
+    );
     inner.connectionTimeout = connectionTimeout ?? _requestTimeout;
     if (useTls) {
       final pinned = normalizeFingerprint(pinnedCertSha256);
@@ -93,20 +96,19 @@ class ShadowPlayApi {
           kind: ApiFailureKind.protocol,
         );
       }
-      inner.badCertificateCallback =
-          (cert, host, port) => certificateMatchesPin(cert, pinned);
+      inner.badCertificateCallback = (cert, host, port) {
+        final matches = certificateMatchesPin(cert, pinned);
+        if (!matches) onPinMismatch?.call();
+        return matches;
+      };
     }
     return inner;
   }
 
   static http.Client transportClient(Connection connection,
       {Duration? connectionTimeout}) {
-    final inner = ioClient(
-      useTls: connection.usesTls,
-      pinnedCertSha256: connection.certSha256,
-      connectionTimeout: connectionTimeout,
-    );
-    return http_io.IOClient(inner);
+    return _ownedStaticClient(null, connection.usesTls, connection.certSha256,
+        connectionTimeout: connectionTimeout ?? _requestTimeout);
   }
 
   /// SHA-256 pin check for a presented certificate.
@@ -202,19 +204,14 @@ class ShadowPlayApi {
   /// its transport and must be disposed after the body is consumed.
   Future<DownloadSegment> openDownload(Clip clip, {int? rangeStart}) async {
     final uri = clipStreamUri(clip);
-    final inner = http_io.IOClient(
-      ioClient(
-        useTls: connection.usesTls,
-        pinnedCertSha256: connection.certSha256,
-      ),
-    );
+    final inner = transportClient(connection);
     try {
       final request = http.Request('GET', uri);
       request.headers.addAll(_headers);
       if (rangeStart != null && rangeStart > 0) {
         request.headers['Range'] = 'bytes=$rangeStart-';
       }
-      final response = await _withTimeout(request.send(), uri);
+      final response = await _withTimeout(inner.send(request), uri);
       if (response.statusCode == 401 ||
           response.statusCode == 403 ||
           response.statusCode == 404) {
@@ -356,18 +353,14 @@ class ShadowPlayApi {
   }
 
   static http.Client _ownedStaticClient(
-      http.Client? provided, bool useTls, String? pinnedCertSha256) {
+      http.Client? provided, bool useTls, String? pinnedCertSha256,
+      {Duration? connectionTimeout}) {
     if (provided != null) return provided;
-    if (useTls) {
-      return http_io.IOClient(
-        ioClient(
-          useTls: true,
-          pinnedCertSha256: pinnedCertSha256,
-          connectionTimeout: _pairingTimeout,
-        ),
-      );
-    }
-    return http.Client();
+    return _PinnedTransport(
+      useTls: useTls,
+      pin: pinnedCertSha256,
+      connectionTimeout: connectionTimeout ?? _pairingTimeout,
+    );
   }
 
   static Uri _endpointUri(String address, int port, String path,
@@ -384,13 +377,13 @@ class ShadowPlayApi {
 
   /// Runs [body] with an owned (or provided) transport, closing the owned
   /// transport after the request completes.
-  static Future<T> _run<T>({
+  Future<T> _run<T>({
     required http.Client? client,
     required Uri uri,
     required Future<T> Function(http.Client owned) body,
   }) async {
     if (client != null) return body(client);
-    final owned = http.Client();
+    final owned = transportClient(connection);
     try {
       return await body(owned);
     } finally {
@@ -464,10 +457,10 @@ class ShadowPlayApi {
 
   static ApiException _tlsError(HandshakeException error, Uri uri) {
     return ApiException(
-      'Kivo could not verify the PC identity over the encrypted link '
-      '(${uri.host}:${uri.port}). The PC certificate may have changed; '
-      're-pair the phone from the QR code on the PC.',
-      kind: ApiFailureKind.tlsUntrusted,
+      'The encrypted connection to ${uri.host}:${uri.port} could not be established. '
+      'Check that sharing is running, Windows Wi-Fi is Private, and Windows Firewall allows Kivo. '
+      'No certificate change was confirmed.',
+      kind: ApiFailureKind.network,
     );
   }
 
@@ -513,4 +506,40 @@ class ShadowPlayApi {
       );
     }
   }
+}
+
+// Track an actual rejected leaf separately from interrupted TLS handshakes.
+class _PinnedTransport extends http.BaseClient {
+  _PinnedTransport(
+      {required bool useTls, String? pin, Duration? connectionTimeout}) {
+    _inner = http_io.IOClient(ShadowPlayApi.ioClient(
+      useTls: useTls,
+      pinnedCertSha256: pin,
+      connectionTimeout: connectionTimeout,
+      onPinMismatch: () => _pinMismatches++,
+    ));
+  }
+
+  late final http.Client _inner;
+  int _pinMismatches = 0;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final previousMismatches = _pinMismatches;
+    try {
+      return await _inner.send(request);
+    } catch (_) {
+      if (_pinMismatches > previousMismatches) {
+        throw const ApiException(
+          'The PC presented a different certificate than the saved identity. '
+          'Verify the PC and re-pair using its QR code.',
+          kind: ApiFailureKind.tlsUntrusted,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  void close() => _inner.close();
 }
