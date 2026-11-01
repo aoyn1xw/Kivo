@@ -393,3 +393,14 @@ Administrator-controlled changes can race filesystem checks; the migration is
 not a security boundary against another administrator. Installer runtime safety,
 shortcut retargeting, failure logging, data retention, and signed mobile upgrade
 continuity still require disposable-environment manual validation.
+
+---
+
+## 11. iOS Release & OTA Infrastructure Repair (`fix/ios-release-ota`)
+
+This concise addendum records the release/OTA repair on branch `fix/ios-release-ota` (preserving ??1?10 verbatim).
+
+- **`.github/workflows/release.yml` & `.github/scripts/github_api.sh`:** Serializes `latest` release updates with `ios-ota.yml` (`latest-release-${{ github.repository }}`), classifies HTTP responses so mutations (`PATCH`/`POST` tag ref, `gh release create`) run only on confirmed `2xx`/`404` statuses, updates `latest` in place while preserving `Kivo.ipa`, and prunes superseded assets only after byte-for-byte verification of every fresh build asset.
+- **`.github/workflows/ios-ota.yml` & `.github/scripts/verify_ipa.py`:** Requires dispatch from `main`, consolidates pre-publish IPA validation into `.github/scripts/verify_ipa.py` (verifying `Info.plist` bundle/version/deployment target, `CFBundlePrimaryIcon` against `Assets.car` via `xcrun assetutil` or loose PNGs, embedded Ad-Hoc profile UUID/team/devices and timezone-safe UTC `ExpirationDate`, `codesign --verify --strict` on the app and all nested bundles/dylibs with team matching, and XML entitlements via `codesign -d --entitlements - --xml` checking `application-identifier`, `com.apple.developer.team-identifier`, and `keychain-access-groups`), triggers and polls GitHub Pages builds by `commit`/`status`/`created_at`/`error.message`, and verifies deployed `manifest.plist` bytes and downloaded `Kivo.ipa` SHA-256.
+- **`docs/.nojekyll` & `docs/index.html`:** Disables Jekyll/Liquid parsing on GitHub Pages and updates OTA page metadata (`Rolling OTA build`, `iOS 18.0+`, `Signed dev build`). `AppIcon.appiconset` remains the stock Flutter template pending user-supplied Kivo artwork.
+- **Verification:** Validated locally on Windows with `actionlint`, YAML parsing, `bash -n`, and focused regression suites (`tests/workflows/verify_ipa_test.py` and `tests/workflows/github_api_test.sh`). Real macOS `codesign`/`security cms`/`assetutil` execution, GitHub Pages builds, and physical-device OTA installation require GitHub Actions and iOS hardware.

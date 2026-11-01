@@ -8,9 +8,10 @@ on:
       - "v*"
   workflow_dispatch:
 
+# Serialize rolling `latest` release updates across release.yml and ios-ota.yml.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+  group: latest-release-${{ github.repository }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -177,11 +178,15 @@ jobs:
       - windows
       - android
     runs-on: ubuntu-latest
+    if: github.repository == 'aoyn1xw/Kivo'
 
     permissions:
       contents: write
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
       - name: Download Windows build
         uses: actions/download-artifact@v8
         with:
@@ -218,7 +223,7 @@ jobs:
           cp "$APK_FILE" dist/Kivo-Android.apk
           ls -lh dist
 
-      - name: Preserve iOS asset and replace rolling release
+      - name: Update and verify rolling latest release
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -227,104 +232,118 @@ jobs:
         run: |
           set -euo pipefail
 
-          if gh release view latest >/dev/null 2>&1; then
-            if gh release view latest --json assets --jq '.assets[].name' | grep -Fxq 'Kivo.ipa'; then
-              gh release download latest \
-                --pattern 'Kivo.ipa' \
-                --dir dist
+          cat > release-notes.md <<'NOTES'
+          Automated latest build from `main` commit `${{ github.sha }}`.
 
-              test -s dist/Kivo.ipa
-            elif gh release view latest --json assets --jq '.assets[].name' | grep -Fxq 'ShadowPlay.ipa'; then
-              gh release download latest \
-                --pattern 'ShadowPlay.ipa' \
-                --dir dist
+          ## Downloads
 
-              mv dist/ShadowPlay.ipa dist/Kivo.ipa
-              test -s dist/Kivo.ipa
-            fi
+          - **Windows Desktop:** `Kivo-Setup-${{ needs.windows.outputs.version }}.exe`
+          - **Android:** `Kivo-Android.apk`
 
-            gh release delete latest --cleanup-tag --yes
-          elif gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/latest" >/dev/null 2>&1; then
-            gh api \
-              --method DELETE \
-              "repos/$GITHUB_REPOSITORY/git/refs/tags/latest"
-          fi
+          ## iOS
 
-      - name: Create rolling latest release
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          fail_on_unmatched_files: true
-          overwrite_files: true
-          preserve_order: true
-          tag_name: latest
-          target_commitish: ${{ github.sha }}
-          name: Kivo (Latest Build)
-          body: |
-            Automated latest build from `main` commit `${{ github.sha }}`.
+          This release does not contain an iOS artifact rebuilt from this commit.
+          A `Kivo.ipa` asset, when present, is the most recent signed build published by the `iOS Signed OTA Build` workflow.
+          NOTES
 
-            ## Downloads
+          # shellcheck source=/dev/null
+          source "$GITHUB_WORKSPACE/.github/scripts/github_api.sh"
 
-            - **Windows Desktop:** `Kivo-Setup-${{ needs.windows.outputs.version }}.exe`
-            - **Android:** `Kivo-Android.apk`
-            - **iOS OTA / Ad Hoc:** `Kivo.ipa`
-
-            The signed iOS build can only be installed on devices included in its provisioning profile.
-          draft: false
-          prerelease: true
-          make_latest: false
-          generate_release_notes: false
-
-      - name: Verify rolling latest release
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          ASSETS="$(gh release view latest --json assets --jq '.assets[].name')"
-          printf '%s\n' "$ASSETS"
-
-          grep -Fxq "Kivo-Setup-${{ needs.windows.outputs.version }}.exe" <<<"$ASSETS"
-          grep -Fxq "Kivo-Android.apk" <<<"$ASSETS"
-
-          if [ -f dist/Kivo.ipa ]; then
-            grep -Fxq "Kivo.ipa" <<<"$ASSETS"
-          fi
-
-          if grep -Fxq "Kivo-win-x64.zip" <<<"$ASSETS" || \
-             grep -Fxq "Kivo-Android-debug.apk" <<<"$ASSETS" || \
-             grep -Fxq "ShadowPlay-win-x64.zip" <<<"$ASSETS" || \
-             grep -Fxq "ShadowPlay-Android-debug.apk" <<<"$ASSETS"; then
-            echo "::error::The rolling release still contains superseded assets"
+          RELEASE_STATUS="$(api_http_status "repos/$GITHUB_REPOSITORY/releases/tags/latest")"
+          if ! classify_http_status "$RELEASE_STATUS" "the rolling latest release"; then
             exit 1
           fi
 
-          RELEASE_SHA="$(
-            gh api \
-              "repos/$GITHUB_REPOSITORY/git/ref/tags/latest" \
-              --jq '.object.sha'
+          TAG_STATUS="$(api_http_status "repos/$GITHUB_REPOSITORY/git/ref/tags/latest")"
+          if ! classify_http_status "$TAG_STATUS" "the 'latest' tag ref"; then
+            exit 1
+          fi
+
+          if [ "$TAG_STATUS" = "200" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/latest" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/latest" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+          if [ "$RELEASE_STATUS" = "404" ]; then
+            gh release create latest \
+              --title "Kivo (Latest Build)" \
+              --notes-file release-notes.md \
+              --prerelease \
+              --latest=false
+          fi
+
+          # Preserve existing release and Kivo.ipa in place; overwrite fresh assets.
+          gh release upload latest dist/* --clobber
+          gh release edit latest \
+            --title "Kivo (Latest Build)" \
+            --notes-file release-notes.md \
+            --prerelease \
+            --latest=false
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/latest" > release-assets/latest.json
+          mkdir -p verify
+
+          for asset in dist/*; do
+            name="$(basename "$asset")"
+            local_size="$(stat -c %s "$asset")"
+            published_size="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .size' release-assets/latest.json)"
+            published_state="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .state' release-assets/latest.json)"
+
+            if [ "$published_size" != "$local_size" ] || [ "$published_state" != "uploaded" ]; then
+              echo "::error::Published asset metadata mismatch for $name (size=$published_size/$local_size, state=$published_state)"
+              exit 1
+            fi
+
+            rm -f "verify/$name"
+            gh release download latest --pattern "$name" --dir verify --clobber
+            if ! cmp -s "$asset" "verify/$name"; then
+              echo "::error::Published asset byte comparison failed for $name"
+              exit 1
+            fi
+          done
+
+          # Prune superseded assets only after fresh assets are verified byte-for-byte.
+          LATEST_ASSETS="$(
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/latest" \
+              --jq '.assets[] | "\(.id)\t\(.name)"'
           )"
 
+          if [ -n "$LATEST_ASSETS" ]; then
+            while IFS=$'\t' read -r asset_id asset_name; do
+              if [ "$asset_name" = "Kivo.ipa" ] || [ -f "dist/$asset_name" ]; then
+                continue
+              fi
+              echo "Removing superseded asset: $asset_name"
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+            done <<< "$LATEST_ASSETS"
+          fi
+
+          REMAINING_ASSETS="$(
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/latest" \
+              --jq '.assets[].name'
+          )"
+
+          if [ -n "$REMAINING_ASSETS" ]; then
+            while IFS= read -r asset_name; do
+              if [ "$asset_name" != "Kivo.ipa" ] && [ ! -f "dist/$asset_name" ]; then
+                echo "::error::Superseded asset survived pruning: $asset_name"
+                exit 1
+              fi
+            done <<< "$REMAINING_ASSETS"
+          fi
+
+          RELEASE_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/latest" --jq '.object.sha')"
           if [ "$RELEASE_SHA" != "$GITHUB_SHA" ]; then
             echo "::error::latest points to $RELEASE_SHA instead of $GITHUB_SHA"
             exit 1
           fi
 
           PRERELEASE="$(gh release view latest --json isPrerelease --jq '.isPrerelease')"
-          PUBLISHED_AT="$(gh release view latest --json publishedAt --jq '.publishedAt')"
-          PUBLISHED_AGE_SECONDS="$(($(date +%s) - $(date -d "$PUBLISHED_AT" +%s)))"
-
           if [ "$PRERELEASE" != "true" ]; then
             echo "::error::latest is not marked as a prerelease"
-            exit 1
-          fi
-
-          if [ "$PUBLISHED_AGE_SECONDS" -lt 0 ] || [ "$PUBLISHED_AGE_SECONDS" -gt 900 ]; then
-            echo "::error::latest was not freshly published: $PUBLISHED_AT"
             exit 1
           fi
 

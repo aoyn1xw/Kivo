@@ -33,3 +33,5 @@ ios/DerivedData/
 *.ipa
 *.xcuserstate
 xcuserdata/
+
+__pycache__/

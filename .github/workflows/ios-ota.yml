@@ -3,19 +3,29 @@ name: iOS Signed OTA Build
 on:
   workflow_dispatch:
 
+# Serialize rolling `latest` release updates across ios-ota.yml and release.yml.
 concurrency:
-  group: ios-signed-${{ github.ref }}
-  cancel-in-progress: true
+  group: latest-release-${{ github.repository }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
+  pages: write
 
 jobs:
   build-ios:
     name: Build signed iOS OTA IPA
     runs-on: macos-15
+    if: github.repository == 'aoyn1xw/Kivo'
 
     steps:
+      - name: Require main branch
+        run: |
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "::error::iOS OTA publication must run from the 'main' branch (dispatched from '$GITHUB_REF_NAME')."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v7
 
@@ -467,7 +477,7 @@ jobs:
             -exportPath "$EXPORT_PATH" \
             -exportOptionsPlist "$EXPORT_OPTIONS"
 
-      - name: Stage IPA
+      - name: Stage and verify signed IPA
         run: |
           set -euo pipefail
 
@@ -485,12 +495,16 @@ jobs:
           fi
 
           mkdir -p output
-
-          cp "$IPA_FILE" \
-            output/Kivo.ipa
-
-          echo "Signed IPA:"
+          cp "$IPA_FILE" output/Kivo.ipa
           ls -lh output/Kivo.ipa
+
+          python3 "$GITHUB_WORKSPACE/.github/scripts/verify_ipa.py" \
+            output/Kivo.ipa \
+            "$BUNDLE_ID" \
+            "$TEAM_ID" \
+            "$PROFILE_UUID" \
+            flutter/pubspec.yaml \
+            flutter/ios/Runner.xcodeproj/project.pbxproj
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v7
@@ -500,52 +514,54 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Publish latest OTA release
+      - name: Publish verified IPA to latest release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          if gh release view latest >/dev/null 2>&1; then
-            echo "Updating existing latest release"
-          else
-            gh release create latest \
-              --title "Kivo iOS OTA" \
-              --notes "Latest signed Kivo iOS OTA build." \
-              --target "$GITHUB_SHA"
+          # shellcheck source=/dev/null
+          source "$GITHUB_WORKSPACE/.github/scripts/github_api.sh"
+
+          RELEASE_STATUS="$(api_http_status "repos/$GITHUB_REPOSITORY/releases/tags/latest")"
+
+          if ! classify_http_status "$RELEASE_STATUS" "the rolling latest release"; then
+            exit 1
           fi
 
-          gh release upload latest \
-            output/Kivo.ipa \
-            --clobber
+          if [ "$RELEASE_STATUS" = "404" ]; then
+            gh release create latest \
+              --title "Kivo iOS OTA" \
+              --notes "Signed Kivo iOS OTA build." \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --latest=false
+          fi
 
-      - name: Generate OTA manifest
+          gh release upload latest output/Kivo.ipa --clobber
+
+          cat > "$RUNNER_TEMP/ota-release-notes.md" <<EOF
+          Signed Kivo iOS OTA build.
+
+          - Source commit: $GITHUB_SHA
+          - Bundle identifier: $BUNDLE_ID
+          - App version: $IPA_APP_VERSION (build $IPA_BUILD_NUMBER)
+          - Minimum iOS version: $IPA_MIN_OS_VERSION
+          - IPA SHA-256: $IPA_SHA256
+          - Signing: ad-hoc IPA signed with an Apple Distribution certificate;
+            install only on devices listed in the provisioning profile.
+          EOF
+
+          gh release edit latest \
+            --notes-file "$RUNNER_TEMP/ota-release-notes.md" \
+            --prerelease \
+            --latest=false
+
+      - name: Generate and publish OTA manifest
         run: |
           set -euo pipefail
 
           mkdir -p docs
-
-          VERSION_LINE="$(
-            grep '^version:' flutter/pubspec.yaml \
-            | head -n 1 \
-            | awk '{print $2}'
-          )"
-
-          APP_VERSION="${VERSION_LINE%%+*}"
-
-          if [[ "$VERSION_LINE" == *"+"* ]]; then
-            BUILD_NUMBER="${VERSION_LINE##*+}"
-          else
-            BUILD_NUMBER="1"
-          fi
-
-          if [ -z "$APP_VERSION" ]; then
-            APP_VERSION="1.0.0"
-          fi
-
-          if [ -z "$BUILD_NUMBER" ]; then
-            BUILD_NUMBER="1"
-          fi
 
           cat > docs/manifest.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -562,7 +578,7 @@ jobs:
                               <string>software-package</string>
 
                               <key>url</key>
-                              <string>https://github.com/aoyn1xw/Kivo/releases/download/latest/Kivo.ipa</string>
+                              <string>https://github.com/$GITHUB_REPOSITORY/releases/download/latest/Kivo.ipa</string>
                           </dict>
                       </array>
 
@@ -572,7 +588,7 @@ jobs:
                           <string>$BUNDLE_ID</string>
 
                           <key>bundle-version</key>
-                          <string>$BUILD_NUMBER</string>
+                          <string>$IPA_BUILD_NUMBER</string>
 
                           <key>kind</key>
                           <string>software</string>
@@ -588,67 +604,136 @@ jobs:
 
           plutil -lint docs/manifest.plist
 
-          echo "Version: $APP_VERSION"
-          echo "Build number: $BUILD_NUMBER"
-
-      - name: Publish updated OTA manifest
-        run: |
-          set -euo pipefail
-
-          if git diff --quiet -- docs/manifest.plist; then
-            echo "Manifest already up to date"
-            exit 0
-          fi
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add docs/manifest.plist
+          PAGES_REQUEST_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if git diff --quiet -- docs/manifest.plist; then
+            MANIFEST_SHA="$GITHUB_SHA"
+          else
+            git add docs/manifest.plist
+            git commit -m "chore: update iOS OTA manifest"
+            git push
+            MANIFEST_SHA="$(git rev-parse HEAD)"
+          fi
 
-          git commit \
-            -m "chore: update iOS OTA manifest"
+          echo "Manifest commit: $MANIFEST_SHA"
+          echo "MANIFEST_SHA=$MANIFEST_SHA" >> "$GITHUB_ENV"
+          echo "PAGES_REQUEST_AT=$PAGES_REQUEST_AT" >> "$GITHUB_ENV"
 
-          git push
-
-      - name: Verify OTA endpoints
+      - name: Trigger and verify Pages deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST_URL: https://aoyn1xw.github.io/Kivo/manifest.plist
+          IPA_URL: https://github.com/aoyn1xw/Kivo/releases/download/latest/Kivo.ipa
         run: |
           set -euo pipefail
 
-          sleep 5
+          # shellcheck source=/dev/null
+          source "$GITHUB_WORKSPACE/.github/scripts/github_api.sh"
 
-          IPA_URL="https://github.com/aoyn1xw/Kivo/releases/download/latest/Kivo.ipa"
-          MANIFEST_URL="https://aoyn1xw.github.io/Kivo/manifest.plist"
+          PAGES_STATUS="$(api_http_status "repos/$GITHUB_REPOSITORY/pages")"
+          if ! classify_http_status "$PAGES_STATUS" "GitHub Pages configuration"; then
+            exit 1
+          fi
+          if [ "$PAGES_STATUS" = "404" ]; then
+            echo "::error::GitHub Pages is not enabled for $GITHUB_REPOSITORY (enable 'Deploy from a branch: main /docs')."
+            exit 1
+          fi
 
-          echo "Checking IPA..."
-          curl \
-            --fail \
-            --location \
-            --silent \
-            --show-error \
-            --head \
-            "$IPA_URL"
+          PAGES_BUILD_TYPE="$(jq -r '.build_type // "unknown"' "$RUNNER_TEMP/github-api-body.json")"
+          if [ "$PAGES_BUILD_TYPE" = "workflow" ]; then
+            echo "::error::GitHub Pages uses build_type=workflow; set source to 'Deploy from a branch: main /docs'."
+            exit 1
+          fi
 
-          echo "Checking manifest..."
-          curl \
-            --fail \
-            --location \
-            --silent \
-            --show-error \
-            "$MANIFEST_URL" \
-            >/dev/null
+          : "${PAGES_REQUEST_AT:=$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
-          echo "OTA endpoints available"
+          # Pushing with GITHUB_TOKEN does not automatically trigger a legacy Pages build.
+          TRIGGER_CODE="$(curl -sS \
+            -o "$RUNNER_TEMP/pages-trigger.json" \
+            -w '%{http_code}' \
+            --max-time 60 \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/pages/builds" \
+            || true
+          )"
+
+          TRIGGER_BUILD_URL=""
+          case "${TRIGGER_CODE:-000}" in
+            2??)
+              TRIGGER_BUILD_URL="$(jq -r '.url // empty' "$RUNNER_TEMP/pages-trigger.json" 2>/dev/null || true)"
+              ;;
+            409)
+              ;;
+            *)
+              echo "::error::Could not trigger GitHub Pages build (HTTP ${TRIGGER_CODE:-000})."
+              exit 1
+              ;;
+          esac
+
+          BUILT=0
+          for attempt in $(seq 1 40); do
+            BUILDS_CODE="$(api_http_status "repos/$GITHUB_REPOSITORY/pages/builds?per_page=30")"
+            if [ "$BUILDS_CODE" = "200" ]; then
+              BUILD_STATE="$(pages_commit_build_status "$RUNNER_TEMP/github-api-body.json" "$MANIFEST_SHA" "$PAGES_REQUEST_AT" "$TRIGGER_BUILD_URL")"
+              STATUS="${BUILD_STATE%%$'\t'*}"
+              ERR_MSG="${BUILD_STATE#*$'\t'}"
+              echo "Pages build for $MANIFEST_SHA (attempt $attempt): $STATUS"
+
+              case "$STATUS" in
+                built)
+                  BUILT=1
+                  break
+                  ;;
+                errored)
+                  echo "::error::GitHub Pages build failed for $MANIFEST_SHA: $ERR_MSG"
+                  exit 1
+                  ;;
+                queued|building|none)
+                  ;;
+                *)
+                  echo "::error::Unexpected Pages build status response: $BUILD_STATE"
+                  exit 1
+                  ;;
+              esac
+            fi
+            sleep 15
+          done
+
+          if [ "$BUILT" != "1" ]; then
+            echo "::error::GitHub Pages did not finish building commit $MANIFEST_SHA within 10 minutes."
+            exit 1
+          fi
+
+          DEPLOYED="$RUNNER_TEMP/deployed-manifest.plist"
+          curl -sS --fail --location --max-time 60 "$MANIFEST_URL?sha=$MANIFEST_SHA" -o "$DEPLOYED"
+          if ! cmp -s docs/manifest.plist "$DEPLOYED"; then
+            echo "::error::Deployed manifest at $MANIFEST_URL does not match docs/manifest.plist"
+            exit 1
+          fi
+
+          VERIFY_DIR="$RUNNER_TEMP/ota-verify"
+          rm -rf "$VERIFY_DIR"
+          mkdir -p "$VERIFY_DIR"
+          gh release download latest --pattern 'Kivo.ipa' --dir "$VERIFY_DIR" --clobber
+
+          PUBLISHED_SHA256="$(shasum -a 256 "$VERIFY_DIR/Kivo.ipa" | awk '{print $1}')"
+          if [ "$PUBLISHED_SHA256" != "$IPA_SHA256" ]; then
+            echo "::error::Published Kivo.ipa SHA-256 ($PUBLISHED_SHA256) does not match verified build ($IPA_SHA256)"
+            exit 1
+          fi
+
+          curl --fail --location --silent --show-error --head "$IPA_URL" >/dev/null
+          echo "Verified OTA manifest and IPA endpoints for commit $MANIFEST_SHA"
 
       - name: Print install information
         run: |
-          echo "Install page:"
-          echo "https://aoyn1xw.github.io/Kivo/"
-
-          echo "Manifest:"
-          echo "https://aoyn1xw.github.io/Kivo/manifest.plist"
-
-          echo "Signed IPA:"
-          echo "https://github.com/aoyn1xw/Kivo/releases/download/latest/Kivo.ipa"
+          echo "Install page: https://aoyn1xw.github.io/Kivo/"
+          echo "Manifest:     https://aoyn1xw.github.io/Kivo/manifest.plist"
+          echo "Signed IPA:   https://github.com/aoyn1xw/Kivo/releases/download/latest/Kivo.ipa"
 
       - name: Clean up signing files
         if: always()
