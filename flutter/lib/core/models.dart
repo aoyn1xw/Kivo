@@ -255,15 +255,45 @@ Duration? _durationFromJson(Object? value) {
   return null;
 }
 
-enum DeviceAvailability { checking, online, offline }
+enum DeviceAvailability { checking, online, offline, error }
+
+enum ConnectionIssue {
+  unreachable,
+  networkRestricted,
+  authenticationRequired,
+  certificateChanged,
+  updateRequired,
+  serverError,
+  invalidResponse,
+  unknown,
+}
 
 class DeviceStatus {
-  const DeviceStatus(this.availability, {this.message});
+  const DeviceStatus(this.availability, {this.message, this.issue});
   const DeviceStatus.checking() : this(DeviceAvailability.checking);
   const DeviceStatus.online() : this(DeviceAvailability.online);
   const DeviceStatus.offline([String? message])
-      : this(DeviceAvailability.offline, message: message);
+      : this(DeviceAvailability.offline,
+            message: message, issue: ConnectionIssue.unreachable);
+  const DeviceStatus.error(ConnectionIssue issue, String message)
+      : this(DeviceAvailability.error, message: message, issue: issue);
 
   final DeviceAvailability availability;
   final String? message;
+  final ConnectionIssue? issue;
+
+  String get label => switch (availability) {
+        DeviceAvailability.checking => 'Checking connection…',
+        DeviceAvailability.online => 'Connected',
+        DeviceAvailability.offline => 'PC unreachable',
+        DeviceAvailability.error => switch (issue) {
+            ConnectionIssue.authenticationRequired => 'Pairing required',
+            ConnectionIssue.certificateChanged => 'PC identity changed',
+            ConnectionIssue.updateRequired => 'Update required',
+            ConnectionIssue.networkRestricted => 'Local network restricted',
+            ConnectionIssue.serverError => 'PC request failed',
+            ConnectionIssue.invalidResponse => 'Invalid PC response',
+            _ => 'Connection problem',
+          },
+      };
 }

@@ -72,6 +72,14 @@ class AppState extends ChangeNotifier {
 
   /// Monotonic guard: only the newest refresh may publish results.
   int _refreshGeneration = 0;
+  final Map<String, int> _statusVersions = {};
+
+  int _nextStatusVersion(String serverId) =>
+      _statusVersions[serverId] = (_statusVersions[serverId] ?? 0) + 1;
+
+  bool _isCurrentStatus(Connection connection, int version) =>
+      _statusVersions[connection.serverId] == version &&
+      connections.any((item) => identical(item, connection));
 
   String? activeServerId;
   String? _activeToken;
@@ -286,6 +294,12 @@ class AppState extends ChangeNotifier {
       httpsPort: httpsPort,
       certSha256: certSha256,
     );
+    ++_refreshGeneration;
+    _nextStatusVersion(connection.serverId);
+    remoteClips = [];
+    clipLoadError = null;
+    lastSyncUtc = null;
+    clipsLoading = false;
     connections.removeWhere((item) => item.serverId == connection.serverId);
     connections.add(connection);
     activeServerId = connection.serverId;
@@ -333,20 +347,32 @@ class AppState extends ChangeNotifier {
   // ------------------------------------------------------------- selection
 
   Future<void> select(Connection connection) async {
+    ++_refreshGeneration;
     activeServerId = connection.serverId;
-    _activeToken = await _tokenFor(connection.serverId);
+    _activeToken = null;
+    remoteClips = [];
+    clipLoadError = null;
+    lastSyncUtc = null;
+    clipsLoading = false;
+    final selectedConnection = active;
+    final token = await _tokenFor(connection.serverId);
+    // A background check may run while secure storage is loading. Only a
+    // device change/replacement should supersede this selection's token.
+    if (selectedConnection == null || !identical(active, selectedConnection)) {
+      return;
+    }
+    _activeToken = token;
     diagnostics.debug('network', 'Active PC switched', {
       'pc': connection.computerName,
       'pc id': shortId(connection.serverId),
     });
-    remoteClips = [];
-    clipLoadError = null;
     await _saveConnections();
     notifyListeners();
     await refreshClips();
   }
 
   Future<void> forget(Connection connection) async {
+    _nextStatusVersion(connection.serverId);
     // Invalidate the active library before awaiting storage or token removal.
     if (activeServerId == connection.serverId) {
       ++_refreshGeneration;
@@ -379,22 +405,29 @@ class AppState extends ChangeNotifier {
   // ------------------------------------------------------------- refreshing
 
   Future<void> refreshClips({bool silent = false}) async {
+    final connection = active;
+    if (connection == null) return;
     final client = api;
-    if (client == null) return;
     final generation = ++_refreshGeneration;
-    final connection = client.connection;
+    final statusVersion = _nextStatusVersion(connection.serverId);
 
     if (!silent) {
       clipsLoading = true;
       notifyListeners();
     }
     try {
+      if (client == null) {
+        throw const ApiException(
+            'Pairing token is missing. Pair with the PC again.',
+            kind: ApiFailureKind.authenticationFailure);
+      }
       final info = await client.serverInfo();
       final clips = await client.clips();
 
       // A newer refresh (or a device switch) supersedes this one entirely.
       if (generation != _refreshGeneration ||
-          activeServerId != connection.serverId) {
+          activeServerId != connection.serverId ||
+          !_isCurrentStatus(connection, statusVersion)) {
         return;
       }
       serverInfos[connection.serverId] = info;
@@ -411,12 +444,13 @@ class AppState extends ChangeNotifier {
       await _saveConnections();
     } catch (error) {
       if (generation != _refreshGeneration ||
-          activeServerId != connection.serverId) {
+          activeServerId != connection.serverId ||
+          !_isCurrentStatus(connection, statusVersion)) {
         return;
       }
-      clipLoadError = error.toString();
-      deviceStatuses[connection.serverId] =
-          DeviceStatus.offline(error.toString());
+      final failure = connectionFailure(error);
+      clipLoadError = failure.message;
+      deviceStatuses[connection.serverId] = failure;
       diagnostics.warning('network', 'Clip refresh failed', {
         'pc': connection.computerName,
         'error': error.toString(),
@@ -430,36 +464,88 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Preserve the transport's distinctions without exposing unexpected exceptions.
+  static DeviceStatus connectionFailure(Object error) {
+    if (error is! ApiException) {
+      return const DeviceStatus.error(ConnectionIssue.unknown,
+          'Could not connect to the PC. Try again or check local diagnostics.');
+    }
+    return switch (error.kind) {
+      ApiFailureKind.timeout ||
+      ApiFailureKind.connectionRefused ||
+      ApiFailureKind.networkUnreachable ||
+      ApiFailureKind.network =>
+        DeviceStatus.offline(error.message),
+      ApiFailureKind.networkIsolation =>
+        DeviceStatus.error(ConnectionIssue.networkRestricted, error.message),
+      ApiFailureKind.authenticationFailure => DeviceStatus.error(
+          ConnectionIssue.authenticationRequired, error.message),
+      ApiFailureKind.tlsUntrusted =>
+        DeviceStatus.error(ConnectionIssue.certificateChanged, error.message),
+      ApiFailureKind.apiIncompatible =>
+        DeviceStatus.error(ConnectionIssue.updateRequired, error.message),
+      ApiFailureKind.http =>
+        DeviceStatus.error(ConnectionIssue.serverError, error.message),
+      ApiFailureKind.malformedResponse ||
+      ApiFailureKind.protocol =>
+        DeviceStatus.error(ConnectionIssue.invalidResponse, error.message),
+      ApiFailureKind.unknown => const DeviceStatus.error(
+          ConnectionIssue.unknown,
+          'Could not connect to the PC. Try again or check local diagnostics.'),
+    };
+  }
+
   Future<void> refreshDeviceStatuses() async {
-    for (final connection in connections) {
-      deviceStatuses[connection.serverId] = const DeviceStatus.checking();
+    // The active PC needs a complete library refresh: /server alone cannot
+    // clear a /clips failure or supersede its in-flight initial load.
+    final activeRefresh = refreshClips(silent: true);
+    // Snapshot the remaining PCs before awaiting token storage.
+    final requests = [
+      for (final connection in connections)
+        if (connection.serverId != activeServerId)
+          (connection, _nextStatusVersion(connection.serverId))
+    ];
+    for (final (connection, _) in requests) {
+      if (deviceStatuses[connection.serverId]?.issue == null) {
+        deviceStatuses[connection.serverId] = const DeviceStatus.checking();
+      }
     }
     notifyListeners();
-    await Future.wait(connections.map((connection) async {
-      try {
-        final token = await _tokenFor(connection.serverId);
-        if (token == null) {
-          throw const ApiException('Pairing token is missing.');
+    await Future.wait([
+      activeRefresh,
+      ...requests.map((request) async {
+        final (connection, version) = request;
+        try {
+          final token = await _tokenFor(connection.serverId);
+          if (!_isCurrentStatus(connection, version)) return;
+          if (token == null) {
+            throw const ApiException(
+                'Pairing token is missing. Pair with the PC again.',
+                kind: ApiFailureKind.authenticationFailure);
+          }
+          final client = _apiFactory?.call(connection, token) ??
+              ShadowPlayApi(connection, token);
+          final info = await client.serverInfo();
+          if (!_isCurrentStatus(connection, version)) return;
+          serverInfos[connection.serverId] = info;
+          connection.computerName = info.computerName;
+          connection.lastSeenUtc = DateTime.now().toUtc();
+          deviceStatuses[connection.serverId] = const DeviceStatus.online();
+          _adoptServerTls(connection, info);
+          diagnostics.debug('network', 'PC reachable', {
+            'pc': info.computerName,
+            'pc id': shortId(connection.serverId),
+          });
+        } catch (error) {
+          if (!_isCurrentStatus(connection, version)) return;
+          deviceStatuses[connection.serverId] = connectionFailure(error);
+          diagnostics.warning('network', 'PC connection check failed', {
+            'pc': connection.computerName,
+            'error': error.toString(),
+          });
         }
-        final info = await ShadowPlayApi(connection, token).serverInfo();
-        serverInfos[connection.serverId] = info;
-        connection.computerName = info.computerName;
-        connection.lastSeenUtc = DateTime.now().toUtc();
-        deviceStatuses[connection.serverId] = const DeviceStatus.online();
-        _adoptServerTls(connection, info);
-        diagnostics.debug('network', 'PC reachable', {
-          'pc': info.computerName,
-          'pc id': shortId(connection.serverId),
-        });
-      } catch (error) {
-        deviceStatuses[connection.serverId] =
-            DeviceStatus.offline(error.toString());
-        diagnostics.warning('network', 'PC unreachable', {
-          'pc': connection.computerName,
-          'error': error.toString(),
-        });
-      }
-    }));
+      })
+    ]);
     await _saveConnections();
     notifyListeners();
   }
