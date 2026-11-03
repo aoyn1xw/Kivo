@@ -37,24 +37,36 @@ class HomeScreen extends StatelessWidget {
                 icon: Icons.desktop_access_disabled,
                 title: 'No PC paired',
                 message: 'Downloaded clips remain available offline.',
-                action: FilledButton(onPressed: onPairPc, child: const Text('Pair a PC')),
+                action: FilledButton(
+                    onPressed: onPairPc, child: const Text('Pair a PC')),
               ),
             ),
-          if (active != null) SliverToBoxAdapter(
-            child: DeviceHeader(
-              connection: active,
+          if (active != null)
+            SliverToBoxAdapter(
+              child: DeviceHeader(
+                connection: active,
+                status: state.activeStatus,
+                lastSyncUtc: state.lastSyncUtc,
+                title: 'Kivo',
+              ),
+            ),
+          if (active != null && state.activeStatus.issue != null)
+            SliverToBoxAdapter(
+                child: ConnectionProblemBanner(
               status: state.activeStatus,
+              onRetry: state.refreshClips,
+              onPairPc: onPairPc,
               lastSyncUtc: state.lastSyncUtc,
-              title: 'Kivo',
+              hasCachedClips: state.remoteClips.isNotEmpty,
+            )),
+          if (active != null)
+            SliverToBoxAdapter(
+              child: _NewRecordingsCard(
+                newCount: state.newClipCount,
+                pcName: active.computerName,
+                onViewRecordings: onViewRecordings,
+              ),
             ),
-          ),
-          if (active != null) SliverToBoxAdapter(
-            child: _NewRecordingsCard(
-              newCount: state.newClipCount,
-              pcName: active.computerName,
-              onViewRecordings: onViewRecordings,
-            ),
-          ),
           SliverToBoxAdapter(
             child: LibraryHeading(
               title: 'Downloaded clips',

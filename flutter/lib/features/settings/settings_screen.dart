@@ -335,7 +335,7 @@ class _DeviceTile extends StatelessWidget {
             ? 'Checking…'
             : online
                 ? 'Online · ${_lastSeen(connection.lastSeenUtc)}'
-                : 'Offline · ${_lastSeen(connection.lastSeenUtc)}',
+                : '${status.label} · ${_lastSeen(connection.lastSeenUtc)}',
       ),
       onTap: onTap,
       trailing: IconButton(

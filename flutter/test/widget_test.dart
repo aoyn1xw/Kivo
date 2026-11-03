@@ -123,7 +123,8 @@ void main() {
     expect(find.text('1 selected'), findsOneWidget);
     expect(find.text('Download 1 clip'), findsOneWidget);
 
-    await tester.ensureVisible(find.text('Ranked_Clutch.mp4'));
+    await tester.scrollUntilVisible(find.text('Ranked_Clutch.mp4'), 100,
+        scrollable: find.byType(Scrollable).first);
     await tester.pump();
     await tester.tap(find.text('Ranked_Clutch.mp4'));
     await tester.pump();
