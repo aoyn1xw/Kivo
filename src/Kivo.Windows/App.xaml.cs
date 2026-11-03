@@ -96,12 +96,13 @@ public partial class App : Application
         {
             Icon = Services.RuntimeIcon.CreateIconSource(),
         };
-        setupWindow.ShowDialog();
+        var accepted = setupWindow.ShowDialog();
 
-        // After first-time setup the app lives in the tray.
-        if (controller.IsConfigured)
+        // Complete the first-run journey at the pairing screen, including any
+        // sharing error recorded after the folder was saved.
+        if (accepted == true && controller.IsConfigured)
         {
-            _mainWindow = null;
+            ShowMainWindow();
         }
     }
 
@@ -191,6 +192,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         IsExiting = true;
+        (_mainWindow?.DataContext as MainViewModel)?.Dispose();
         _tray?.Dispose();
         _host?.Dispose();
         _guard?.Dispose();

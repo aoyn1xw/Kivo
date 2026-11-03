@@ -17,7 +17,7 @@ public sealed record ClipRow(string Id, string FileName, string SizeDisplay, str
 public sealed record DeviceRow(string DeviceId, string Name, string PairedDisplay);
 
 /// <summary>Main window state: status, address, QR, clips and paired devices.</summary>
-public sealed class MainViewModel : ObservableObject
+public sealed class MainViewModel : ObservableObject, IDisposable
 {
     private readonly AppController _controller;
     private readonly Action _openSettings;
@@ -31,15 +31,42 @@ public sealed class MainViewModel : ObservableObject
     private string _firewallStatusText = "Firewall status has not been checked yet.";
     private bool _firewallNeedsSetup;
     private string _pairingHint = "";
-    private DispatcherTimer? _countdownTimer;
+    private readonly DispatcherTimer _pairingTimer;
+    private readonly Action _stateChangedHandler;
+    private readonly TimeProvider _timeProvider;
+    private PairingDisplaySnapshot? _displayedPairing;
+    private DateTimeOffset? _lastPairingExpiresAt;
+    private bool _disposed;
+    private string _pairingAddress = "";
+    private string _pairingPort = "";
+    private string _pairingCode = "";
+    private bool _hasPairingDetails;
 
     public MainViewModel(AppController controller, Action openSettings)
+        : this(controller, openSettings, Application.Current.Dispatcher, TimeProvider.System)
+    {
+    }
+
+    internal MainViewModel(AppController controller, Action openSettings, Dispatcher dispatcher, TimeProvider timeProvider)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _openSettings = openSettings ?? throw new ArgumentNullException(nameof(openSettings));
-        _dispatcher = Application.Current.Dispatcher;
-
-        _controller.StateChanged += () => _dispatcher.BeginInvoke(RefreshAll);
+        _dispatcher = dispatcher;
+        _timeProvider = timeProvider;
+        _stateChangedHandler = () =>
+        {
+            if (!_disposed && !_dispatcher.HasShutdownStarted)
+            {
+                _dispatcher.BeginInvoke(() => { if (!_disposed) RefreshAll(); });
+            }
+        };
+        _controller.StateChanged += _stateChangedHandler;
+        _pairingTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
+        {
+            Interval = TimeSpan.FromSeconds(1),
+        };
+        _pairingTimer.Tick += OnPairingTick;
+        _pairingTimer.Start();
 
         RefreshAll();
     }
@@ -68,16 +95,19 @@ public sealed class MainViewModel : ObservableObject
 
     public ImageSource? QrImage { get => _qrImage; private set => SetProperty(ref _qrImage, value); }
 
+    public string PairingAddress { get => _pairingAddress; private set => SetProperty(ref _pairingAddress, value); }
+    public string PairingPort { get => _pairingPort; private set => SetProperty(ref _pairingPort, value); }
+    public string PairingCode { get => _pairingCode; private set => SetProperty(ref _pairingCode, value); }
+    public bool HasPairingDetails { get => _hasPairingDetails; private set => SetProperty(ref _hasPairingDetails, value); }
+
     public string PairingHint { get => _pairingHint; private set => SetProperty(ref _pairingHint, value); }
 
     public ICommand RegeneratePairingCommand => new RelayCommand(
         () =>
         {
-            var payload = _controller.BuildQrPayload(regenerate: true);
-            ApplyQr(payload);
-            StartCountdown();
+            if (_controller.RegeneratePairingOffer()) RefreshPairing();
         },
-        () => _controller.IsSharingRunning || _controller.Status.State == SharingState.Paused);
+        () => _controller.Status.State == SharingState.Running);
 
     public ICommand ToggleSharingCommand => new RelayCommand(async () => await _controller.ToggleSharingAsync());
 
@@ -125,16 +155,8 @@ public sealed class MainViewModel : ObservableObject
         FirewallStatusText = _controller.FirewallStatus.Detail;
         FirewallNeedsSetup = IsRunning && _controller.FirewallStatus.NeedsSetup;
 
-        if (IsRunning && QrImage is null)
-        {
-            var payload = _controller.BuildQrPayload(regenerate: false);
-            ApplyQr(payload);
-            StartCountdown();
-        }
-        else if (status.State is SharingState.Paused or SharingState.NotConfigured or SharingState.Error)
-        {
-            PairingHint = "Start sharing to generate a pairing code.";
-        }
+        RefreshPairing();
+        CommandManager.InvalidateRequerySuggested();
 
         RefreshClips();
         RefreshDevices();
@@ -156,35 +178,55 @@ public sealed class MainViewModel : ObservableObject
         private set => SetProperty(ref _firewallNeedsSetup, value);
     }
 
-    private void ApplyQr(string? payload)
+    private void OnPairingTick(object? sender, EventArgs args) => RefreshPairing();
+
+    internal void RefreshPairing()
     {
-        QrImage = Services.QrCodeService.CreatePng(payload ?? "");
-        PairingHint = payload is null ? "" : "Scan with the Kivo phone app to pair.";
+        var snapshot = _controller.PairingSnapshot;
+        if (snapshot is null)
+        {
+            var previouslyDisplayed = _displayedPairing is not null;
+            _displayedPairing = null;
+            QrImage = null;
+            PairingAddress = PairingPort = PairingCode = "";
+            HasPairingDetails = false;
+            if (_controller.Status.State != SharingState.Running)
+            {
+                _lastPairingExpiresAt = null;
+                PairingHint = "Start sharing to generate a pairing code.";
+            }
+            else
+            {
+                PairingHint = _lastPairingExpiresAt is not null && _timeProvider.GetUtcNow() >= _lastPairingExpiresAt
+                    ? "Pairing code expired. Generate a new code."
+                    : "Pairing code no longer available. Generate a new code.";
+            }
+            if (previouslyDisplayed) RefreshDevices();
+            return;
+        }
+
+        if (snapshot != _displayedPairing)
+        {
+            _displayedPairing = snapshot;
+            _lastPairingExpiresAt = snapshot.ExpiresAtUtc;
+            PairingAddress = snapshot.Payload.LanAddress;
+            PairingPort = snapshot.Payload.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            PairingCode = snapshot.Payload.PairingCode;
+            HasPairingDetails = true;
+            QrImage = Services.QrCodeService.CreatePng(snapshot.Payload.ToJson());
+        }
+        var remaining = snapshot.ExpiresAtUtc - _timeProvider.GetUtcNow();
+        PairingHint = $"Pairing code expires in {Math.Max(1, Math.Ceiling(remaining.TotalMinutes))} min. Scan with the phone app.";
     }
 
-    private void StartCountdown()
+    public void Dispose()
     {
-        _countdownTimer?.Stop();
-        _countdownTimer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromSeconds(15),
-        };
-        _countdownTimer.Tick += (_, _) =>
-        {
-            var expires = _controller.PairingExpiresAt;
-            if (expires is null)
-            {
-                PairingHint = "Pairing code expired. Click 'New pairing code'.";
-                _countdownTimer?.Stop();
-                return;
-            }
-
-            var remaining = expires.Value - DateTimeOffset.UtcNow;
-            PairingHint = remaining > TimeSpan.Zero
-                ? $"Pairing code expires in {Math.Ceiling(remaining.TotalMinutes)} min. Scan with the phone app."
-                : "Pairing code expired. Click 'New pairing code'.";
-        };
-        _countdownTimer.Start();
+        if (_disposed) return;
+        _disposed = true;
+        _controller.StateChanged -= _stateChangedHandler;
+        _pairingTimer.Stop();
+        _pairingTimer.Tick -= OnPairingTick;
+        GC.SuppressFinalize(this);
     }
 
     private void RefreshClips()

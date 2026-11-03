@@ -153,8 +153,7 @@ void main() {
     );
   });
 
-  test('onboarding stays complete only while at least one PC remains paired',
-      () async {
+  test('completed onboarding remains complete without paired PCs', () async {
     final preferences = await SharedPreferences.getInstance();
     final connection = Connection(
       serverId: 'server-1',
@@ -176,7 +175,7 @@ void main() {
       preferences,
       onboardingCompleted: true,
     );
-    expect(unpaired.needsOnboarding, isTrue);
+    expect(unpaired.needsOnboarding, isFalse);
   });
 
   test('a downloaded clip leaves the new-clips queue', () async {

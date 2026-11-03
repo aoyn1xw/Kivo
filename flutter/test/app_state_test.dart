@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kivo/core/app_state.dart';
+import 'package:kivo/core/diagnostics.dart';
 import 'package:kivo/core/models.dart';
 import 'package:kivo/core/shadowplay_api.dart';
 
@@ -134,6 +135,166 @@ void main() {
       expect(state.getProgress(device(serverA), sharedClipId), 0.5);
       expect(state.getFailure(null, sharedClipId), isNull,
           reason: 'the b failure must not surface while a is active');
+    });
+  });
+
+  group('offline library without paired PCs', () {
+    test('completed onboarding is independent of connection count', () {
+      for (final completed in [false, true]) {
+        for (final count in [0, 1, 2]) {
+          final state = AppState.forTesting(preferences,
+              connections:
+                  [device(serverA), device(serverB)].take(count).toList(),
+              onboardingCompleted: completed);
+          expect(state.needsOnboarding, !completed);
+          state.dispose();
+        }
+      }
+    });
+
+    test('forget last PC retains downloads and restores them on relaunch',
+        () async {
+      final directory = await Directory.systemTemp.createTemp('kivo-offline-');
+      addTearDown(() => directory.delete(recursive: true));
+      final file =
+          await File('${directory.path}/local.mp4').writeAsBytes([1, 2, 3]);
+      final clip = DownloadedClip(
+          id: 'local',
+          fileName: 'local.mp4',
+          sizeBytes: 3,
+          lastWriteTimeUtc: DateTime.utc(2026),
+          localPath: file.path);
+      await preferences.setBool('onboardingCompleted', true);
+      await preferences
+          .setStringList('downloadedClips', [jsonEncode(clip.toJson())]);
+      final storage = _FakeSecureStorage()..store['token_a'] = 'tokA';
+      final state = AppState.forTesting(preferences,
+          connections: [device(serverA)],
+          activeServerId: 'a',
+          activeToken: 'tokA',
+          secureStorage: storage,
+          onboardingCompleted: true,
+          downloadedClips: [clip]);
+      state.gallerySavedIds.add(clip.id);
+      await state.forget(state.active!);
+      expect(state.needsOnboarding, isFalse);
+      expect(state.active, isNull);
+      expect(state.clipsLoading, isFalse);
+      expect(state.clipLoadError, isNull);
+      expect(state.lastSyncUtc, isNull);
+      expect(storage.store.containsKey('token_a'), isFalse);
+      expect(state.downloadedClips.single.localPath, file.path);
+      expect(state.gallerySavedIds, contains(clip.id));
+      expect(await file.readAsBytes(), [1, 2, 3]);
+      final restored = await AppState.load(diagnostics: Diagnostics());
+      expect(restored.needsOnboarding, isFalse);
+      expect(restored.connections, isEmpty);
+      expect(restored.downloadedClips.single.localPath, file.path);
+      state.dispose();
+      restored.dispose();
+    });
+
+    for (final fail in [false, true]) {
+      test(
+          'late ${fail ? "failure" : "success"} after forgetting last PC is discarded',
+          () async {
+        final state = AppState.forTesting(preferences,
+            connections: [device(serverA)],
+            activeServerId: 'a',
+            activeToken: 'tokA',
+            secureStorage: _FakeSecureStorage(),
+            onboardingCompleted: true);
+        serverA.gate();
+        serverA.failAfterRelease = fail;
+        final refresh = state.refreshClips();
+        await serverA.requestReceived.future;
+        await state.forget(state.active!);
+        serverA.release();
+        await refresh;
+        expect(state.clipsLoading, isFalse);
+        expect(state.remoteClips, isEmpty);
+        expect(state.deviceStatuses, isEmpty);
+        expect(state.serverInfos, isEmpty);
+        expect(state.clipLoadError, isNull);
+        state.dispose();
+      });
+    }
+  });
+
+  test('background refresh during token loading does not cancel selection',
+      () async {
+    final storage = _FakeSecureStorage()
+      ..store['token_b'] = 'tokB'
+      ..readGate = Completer<void>();
+    final state = AppState.forTesting(preferences,
+        connections: [device(serverA), device(serverB)],
+        activeServerId: 'a',
+        activeToken: 'tokA',
+        secureStorage: storage);
+    final selection = state.select(state.connections.last);
+    await storage.readStarted.future;
+    await state.refreshClips(silent: true);
+    storage.readGate!.complete();
+    await selection;
+    expect(state.activeServerId, 'b');
+    expect(state.activeStatus.availability, DeviceAvailability.online);
+    expect(state.remoteClips.single.id, 'b' * 64);
+    state.dispose();
+  });
+
+  test('initial library and status refresh converge on a populated library',
+      () async {
+    final state = buildState(activeServerId: 'a');
+    serverA.gate();
+    final library = state.refreshClips();
+    await serverA.requestReceived.future;
+    final statuses = state.refreshDeviceStatuses();
+    serverA.release();
+    await Future.wait([library, statuses]);
+    expect(state.remoteClips.single.id, 'a' * 64);
+    expect(state.activeStatus.availability, DeviceAvailability.online);
+    expect(state.clipsLoading, isFalse);
+    state.dispose();
+  });
+
+  group('status request lifecycle', () {
+    test('late status success or failure cannot recreate a forgotten PC',
+        () async {
+      final state =
+          buildState(activeServerId: 'b', secureStorage: _FakeSecureStorage());
+      serverA.gate();
+      final refresh = state.refreshDeviceStatuses();
+      await serverA.requestReceived.future;
+      await state.forget(device(serverA));
+      serverA.release();
+      await refresh;
+      expect(state.serverInfos.containsKey('a'), isFalse);
+      expect(state.deviceStatuses.containsKey('a'), isFalse);
+      state.dispose();
+    });
+
+    test('late status failure cannot overwrite explicit replacement pairing',
+        () async {
+      final state =
+          buildState(activeServerId: 'b', secureStorage: _FakeSecureStorage());
+      serverA.gate();
+      serverA.failAfterRelease = true;
+      final refresh = state.refreshDeviceStatuses();
+      await serverA.requestReceived.future;
+      await state.addPaired({
+        'token': 'replacement-token',
+        'server': {
+          'serverId': 'a',
+          'computerName': 'Verified PC',
+          'apiVersion': 1
+        },
+      }, '127.0.0.1', serverA.port);
+      serverA.release();
+      await refresh;
+      expect(state.active!.computerName, 'Verified PC');
+      expect(state.activeStatus.availability, DeviceAvailability.online);
+      expect(state.clipLoadError, isNull);
+      state.dispose();
     });
   });
 
@@ -274,6 +435,7 @@ class _ScriptedServer {
 
   late final HttpServer _http;
   Completer<void>? _gate;
+  final requestReceived = Completer<void>();
 
   /// When true, /server responds with 500 after [release].
   bool failAfterRelease = false;
@@ -305,6 +467,7 @@ class _ScriptedServer {
       return;
     }
 
+    if (!requestReceived.isCompleted) requestReceived.complete();
     final pending = _gate;
     if (pending != null) {
       await pending.future;
@@ -357,6 +520,8 @@ class _ScriptedServer {
 /// back persisted tokens without a platform plugin.
 class _FakeSecureStorage extends FlutterSecureStorage {
   final Map<String, String> store = {};
+  Completer<void>? readGate;
+  final readStarted = Completer<void>();
 
   @override
   Future<String?> read({
@@ -367,8 +532,11 @@ class _FakeSecureStorage extends FlutterSecureStorage {
     WebOptions? webOptions,
     AppleOptions? mOptions,
     WindowsOptions? wOptions,
-  }) async =>
-      store[key];
+  }) async {
+    if (!readStarted.isCompleted) readStarted.complete();
+    await readGate?.future;
+    return store[key];
+  }
 
   @override
   Future<void> write({

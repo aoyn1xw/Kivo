@@ -70,7 +70,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           builder: (context) => AlertDialog(
             title: Text('Forget ${connection.computerName}?'),
             content: const Text(
-                'You will need a new pairing code to connect again.'),
+                'You will need a new pairing code to connect again. Downloaded clips remain available offline.'),
             actions: [
               TextButton(
                   onPressed: () => Navigator.pop(context, false),
@@ -335,7 +335,7 @@ class _DeviceTile extends StatelessWidget {
             ? 'Checking…'
             : online
                 ? 'Online · ${_lastSeen(connection.lastSeenUtc)}'
-                : 'Offline · ${_lastSeen(connection.lastSeenUtc)}',
+                : '${status.label} · ${_lastSeen(connection.lastSeenUtc)}',
       ),
       onTap: onTap,
       trailing: IconButton(

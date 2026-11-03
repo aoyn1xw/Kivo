@@ -9,8 +9,9 @@ import '../../shared/recording_row.dart';
 import '../player/player_screen.dart';
 
 class ClipsScreen extends StatefulWidget {
-  const ClipsScreen({required this.state, super.key});
+  const ClipsScreen({required this.state, this.onPairPc, super.key});
   final AppState state;
+  final VoidCallback? onPairPc;
 
   @override
   State<ClipsScreen> createState() => _ClipsScreenState();
@@ -46,10 +47,13 @@ class _ClipsScreenState extends State<ClipsScreen> {
   Widget build(BuildContext context) {
     final active = widget.state.active;
     if (active == null) {
-      return const EmptyState(
+      return EmptyState(
         icon: Icons.desktop_access_disabled,
         title: 'No PC paired',
-        message: 'Open Settings to pair a PC.',
+        message:
+            'Pair a PC to browse its recordings. Downloaded clips are on Home.',
+        action: FilledButton(
+            onPressed: widget.onPairPc, child: const Text('Pair a PC')),
       );
     }
 
@@ -76,10 +80,21 @@ class _ClipsScreenState extends State<ClipsScreen> {
                     lastSyncUtc: widget.state.lastSyncUtc,
                   ),
                 ),
+                if (widget.state.activeStatus.issue != null)
+                  SliverToBoxAdapter(
+                      child: ConnectionProblemBanner(
+                    status: widget.state.activeStatus,
+                    onRetry: widget.state.refreshClips,
+                    onPairPc: widget.onPairPc,
+                    lastSyncUtc: widget.state.lastSyncUtc,
+                    hasCachedClips: clips.isNotEmpty,
+                  )),
                 SliverToBoxAdapter(
                   child: LibraryHeading(
                     title: 'PC Recordings',
-                    detail: '${clips.length} available · Direct Wi-Fi transfer',
+                    detail: widget.state.activeStatus.issue == null
+                        ? '${clips.length} available · Direct Wi-Fi transfer'
+                        : '${clips.length} cached recordings',
                   ),
                 ),
                 _content(clips),
@@ -104,19 +119,14 @@ class _ClipsScreenState extends State<ClipsScreen> {
         child: Center(child: CircularProgressIndicator()),
       );
     }
-    if (widget.state.activeStatus.availability == DeviceAvailability.offline &&
-        widget.state.remoteClips.isEmpty) {
-      return SliverFillRemaining(
+    if (widget.state.activeStatus.issue != null && clips.isEmpty) {
+      return const SliverFillRemaining(
         hasScrollBody: false,
         child: EmptyState(
-          icon: Icons.wifi_off,
-          title: 'PC is offline',
-          message: widget.state.clipLoadError ??
-              'Make sure your PC is turned on and connected to the same Wi-Fi network.',
-          action: FilledButton.tonal(
-            onPressed: widget.state.refreshClips,
-            child: const Text('Try Again'),
-          ),
+          icon: Icons.cloud_off_outlined,
+          title: 'PC recordings unavailable',
+          message:
+              'Use the connection action above. Downloaded clips remain available on Home.',
         ),
       );
     }

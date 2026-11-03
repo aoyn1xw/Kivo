@@ -105,7 +105,7 @@ class DeviceHeader extends StatelessWidget {
                       ? 'Checking connection…'
                       : online
                           ? _syncText(lastSyncUtc ?? connection.lastSeenUtc)
-                          : 'Offline · ${_relativeTime(connection.lastSeenUtc, prefix: 'last seen ')}',
+                          : '${status.label} · ${_relativeTime(connection.lastSeenUtc, prefix: 'last seen ')}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.onSurfaceVariant,
                       ),
@@ -114,6 +114,97 @@ class DeviceHeader extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Keeps recovery visible even when a cached PC library is still displayed.
+class ConnectionProblemBanner extends StatelessWidget {
+  const ConnectionProblemBanner(
+      {required this.status,
+      required this.onRetry,
+      this.onPairPc,
+      this.lastSyncUtc,
+      this.hasCachedClips = false,
+      super.key});
+  final DeviceStatus status;
+  final VoidCallback onRetry;
+  final VoidCallback? onPairPc;
+  final DateTime? lastSyncUtc;
+  final bool hasCachedClips;
+
+  Future<void> _verifyPc(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+              title: const Text('Verify your PC first'),
+              content: const Text(
+                  'The saved certificate does not match. Verify that Kivo is running on your own PC, then scan the QR code displayed there. Your saved identity will not change unless you explicitly complete pairing.'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancel')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Scan PC QR code')),
+              ],
+            ));
+    if (confirmed == true && context.mounted) onPairPc?.call();
+  }
+
+  void _updateInstructions(BuildContext context) => showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+            title: const Text('Update Kivo'),
+            content: const Text(
+                'Install a compatible Kivo mobile version from the release source you used to install the app, then try again. Your downloaded clips remain available on this phone.'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Close'))
+            ],
+          ));
+
+  @override
+  Widget build(BuildContext context) {
+    if (status.issue == null) return const SizedBox.shrink();
+    final (label, action) = switch (status.issue) {
+      ConnectionIssue.authenticationRequired => ('Re-pair', onPairPc),
+      ConnectionIssue.certificateChanged => (
+          'Verify and re-pair',
+          () => _verifyPc(context)
+        ),
+      ConnectionIssue.updateRequired => (
+          'Update instructions',
+          () => _updateInstructions(context)
+        ),
+      _ => ('Try Again', onRetry),
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      child: Material(
+        color: Theme.of(context).colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(status.label,
+                    style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 6),
+                Text(
+                    status.message ?? 'Check the PC connection and try again.'),
+                if (hasCachedClips) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                      'Showing cached PC recordings · ${_relativeTime(lastSyncUtc, prefix: "last successful refresh ")}'),
+                ],
+                const SizedBox(height: 8),
+                FilledButton.tonal(onPressed: action, child: Text(label)),
+              ],
+            )),
       ),
     );
   }

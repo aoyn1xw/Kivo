@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:kivo/core/shadowplay_api.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kivo/app/app.dart';
 import 'package:kivo/core/app_state.dart';
@@ -38,7 +40,10 @@ Future<AppState> sampleState({bool onboarding = false}) async {
       computerName: 'GAMING-PC',
       address: '192.168.1.20',
       port: 5177);
-  final state = AppState.forTesting(prefs,
+  late final AppState state;
+  state = AppState.forTesting(prefs,
+      activeToken: onboarding ? null : 'review-token',
+      apiFactory: (connection, token) => _ReviewApi(state),
       connections: onboarding ? [] : [pc],
       activeServerId: onboarding ? null : pc.serverId,
       onboardingCompleted: !onboarding,
@@ -159,6 +164,7 @@ void main() {
     expect(find.text('Gallery save failed. Use the save button to retry.'),
         findsOneWidget);
     await capture(tester, 'home-gallery-retry');
+    await tester.ensureVisible(find.text('Downloaded_recording.mp4'));
     await tester.tap(find.text('Downloaded_recording.mp4'));
     await tester.pumpAndSettle();
     expect(find.text('Cannot play this clip'), findsOneWidget);
@@ -187,11 +193,14 @@ void main() {
     await tester.scrollUntilVisible(find.text('Try Again'), 160,
         scrollable: find.byType(Scrollable).last);
     await tester.pump();
-    expect(find.text('PC is offline'), findsOneWidget);
+    expect(find.text('PC unreachable'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await capture(tester, 'offline-large-text');
     await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
     state.clipsLoading = true;
+    state.deviceStatuses['sample-pc'] = const DeviceStatus.checking();
+    state.clipLoadError = null;
     await tester.pumpWidget(
         MaterialApp(home: Scaffold(body: ClipsScreen(state: state))));
     await tester.pump();
@@ -200,6 +209,38 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     state.dispose();
   });
+
+  for (final populated in [false, true]) {
+    testWidgets(
+        'unpaired library remains reachable at large text, populated=$populated',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final state = AppState.forTesting(await SharedPreferences.getInstance(),
+          onboardingCompleted: true,
+          downloadedClips: [
+            if (populated)
+              DownloadedClip(
+                  id: 'offline',
+                  fileName: 'Offline_recording.mp4',
+                  sizeBytes: 3,
+                  lastWriteTimeUtc: DateTime.utc(2026),
+                  localPath: 'missing-offline.mp4'),
+          ]);
+      await mount(tester, state, const Size(320, 568), 2);
+      expect(find.byType(NavigationDestination), findsNWidgets(3));
+      await tester.scrollUntilVisible(
+          find.text(
+              populated ? 'Offline_recording.mp4' : 'No downloaded clips'),
+          120,
+          scrollable: find.byType(Scrollable).first);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await capture(
+          tester, 'unpaired-${populated ? "downloaded" : "empty"}-large-text');
+      await tester.pumpWidget(const SizedBox());
+      state.dispose();
+    });
+  }
 
   for (final size in [const Size(320, 568), const Size(844, 390)]) {
     testWidgets('onboarding and library fit $size at 200 percent text',
@@ -246,4 +287,25 @@ void main() {
       state.dispose();
     });
   }
+}
+
+// A real paired state for layout checks, without depending on a LAN or token plugin.
+class _ReviewApi extends ShadowPlayApi {
+  _ReviewApi(this.state) : super(state.active!, 'review-token');
+  final AppState state;
+  @override
+  Future<ServerInfo> serverInfo({http.Client? client}) async {
+    if (state.activeStatus.issue != null) {
+      throw ApiException(state.activeStatus.message ?? 'PC unreachable',
+          kind: ApiFailureKind.networkUnreachable);
+    }
+    return ServerInfo(
+        serverId: state.active!.serverId,
+        computerName: 'GAMING-PC',
+        clipCount: state.remoteClips.length);
+  }
+
+  @override
+  Future<List<Clip>> clips({http.Client? client}) async =>
+      List.of(state.remoteClips);
 }

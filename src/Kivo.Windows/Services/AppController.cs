@@ -34,6 +34,8 @@ public sealed record ControllerStatus(SharingState State, string? Detail = null,
     public static readonly ControllerStatus Paused = new(SharingState.Paused);
 }
 
+public sealed record PairingDisplaySnapshot(QrPayload Payload, DateTimeOffset ExpiresAtUtc);
+
 /// <summary>
 /// UI-free coordinator. Owns the LAN API host and clip monitor lifetimes, pairing offers
 /// and status transitions. WPF layers subscribe to <see cref="StateChanged"/> and marshal to the UI thread.
@@ -53,6 +55,7 @@ public sealed class AppController : IAsyncDisposable
     private WebApplication? _apiApp;
     private ClipMonitorService? _monitor;
     private int _actualPort;
+    private volatile PairingDisplaySnapshot? _pairingSnapshot;
 
     /// <summary>Live pinned-TLS listener port; 0 when HTTPS is not active.</summary>
     private int _actualHttpsPort;
@@ -293,7 +296,7 @@ public sealed class AppController : IAsyncDisposable
             await _monitor.StartAsync().ConfigureAwait(false);
 
             // Fresh offer so the QR code in the UI is immediately usable.
-            _pairing.NewPairingOffer();
+            CreatePairingSnapshot();
 
             SetStatus(new ControllerStatus(SharingState.Running, null, _actualPort));
         }
@@ -419,15 +422,35 @@ public sealed class AppController : IAsyncDisposable
         }
     }
 
-    /// <summary>Builds the QR payload for the current (or a fresh) pairing offer.</summary>
-    public string? BuildQrPayload(bool regenerate)
+    /// <summary>A read never creates or extends an offer, or advertises a stopped listener.</summary>
+    public PairingDisplaySnapshot? PairingSnapshot
     {
-        var offer = regenerate ? _pairing.NewPairingOffer() : _pairing.CurrentOffer;
-        if (offer is null)
+        get
         {
-            offer = _pairing.NewPairingOffer();
+            var snapshot = _pairingSnapshot;
+            var offer = _pairing.CurrentOffer;
+            return Status.State == SharingState.Running && snapshot is not null
+                && offer is not null && snapshot.Payload.PairingCode == offer.Code
+                && snapshot.ExpiresAtUtc == offer.ExpiresAtUtc
+                ? snapshot : null;
+        }
+    }
+
+    public bool RegeneratePairingOffer()
+    {
+        if (Status.State != SharingState.Running || _apiApp is null || _pairingSnapshot is null)
+        {
+            return false;
         }
 
+        CreatePairingSnapshot();
+        StateChanged?.Invoke();
+        return true;
+    }
+
+    private void CreatePairingSnapshot()
+    {
+        var offer = _pairing.NewPairingOffer();
         var endpoint = LocalIpLocator.FindBestEndpoint();
         var address = endpoint?.Address.ToString() ?? IPAddress.Loopback.ToString();
         _logger?.LogInformation(
@@ -455,11 +478,8 @@ public sealed class AppController : IAsyncDisposable
             };
         }
 
-        StateChanged?.Invoke();
-        return payload.ToJson();
+        _pairingSnapshot = new PairingDisplaySnapshot(payload, offer.ExpiresAtUtc);
     }
-
-    public DateTimeOffset? PairingExpiresAt => _pairing.CurrentOffer?.ExpiresAtUtc;
 
     public IReadOnlyList<ClipEntry> CatalogSnapshot() => _catalog.GetClips();
 
@@ -513,6 +533,8 @@ public sealed class AppController : IAsyncDisposable
 
     private async Task StopCoreAsync()
     {
+        _pairingSnapshot = null;
+        StateChanged?.Invoke();
         if (_monitor is not null)
         {
             await _monitor.StopAsync().ConfigureAwait(false);
