@@ -192,6 +192,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         IsExiting = true;
+        (_mainWindow?.DataContext as MainViewModel)?.Dispose();
         _tray?.Dispose();
         _host?.Dispose();
         _guard?.Dispose();

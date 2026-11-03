@@ -17,6 +17,12 @@ public partial class MainWindow : Window
         DataContext = viewModel;
     }
 
+    protected override void OnClosed(EventArgs e)
+    {
+        ((MainViewModel)DataContext).Dispose();
+        base.OnClosed(e);
+    }
+
     /// <summary>Closing hides to tray; only explicit Exit terminates the process.</summary>
     protected override void OnClosing(CancelEventArgs e)
     {
