@@ -166,7 +166,7 @@
                    FontSize="11"
                    Foreground="#999999"
                    Margin="0,10,0,0"
-                   Text="Clips are shared only on your local Wi-Fi network and only after pairing. Kivo never modifies your recordings." />
+                   Text="Clips are shared only on your local Wi-Fi network and only after pairing. Kivo never modifies your recordings. Closing this window keeps Kivo running; use Exit in the system tray to stop it." />
 
     </Grid>
 </Window>
