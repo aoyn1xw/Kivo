@@ -37,6 +37,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private PairingDisplaySnapshot? _displayedPairing;
     private DateTimeOffset? _lastPairingExpiresAt;
     private bool _disposed;
+    private string _pairingAddress = "";
+    private string _pairingPort = "";
+    private string _pairingCode = "";
+    private bool _hasPairingDetails;
 
     public MainViewModel(AppController controller, Action openSettings)
         : this(controller, openSettings, Application.Current.Dispatcher, TimeProvider.System)
@@ -90,6 +94,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     public ImageSource? QrImage { get => _qrImage; private set => SetProperty(ref _qrImage, value); }
+
+    public string PairingAddress { get => _pairingAddress; private set => SetProperty(ref _pairingAddress, value); }
+    public string PairingPort { get => _pairingPort; private set => SetProperty(ref _pairingPort, value); }
+    public string PairingCode { get => _pairingCode; private set => SetProperty(ref _pairingCode, value); }
+    public bool HasPairingDetails { get => _hasPairingDetails; private set => SetProperty(ref _hasPairingDetails, value); }
 
     public string PairingHint { get => _pairingHint; private set => SetProperty(ref _pairingHint, value); }
 
@@ -179,6 +188,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             var previouslyDisplayed = _displayedPairing is not null;
             _displayedPairing = null;
             QrImage = null;
+            PairingAddress = PairingPort = PairingCode = "";
+            HasPairingDetails = false;
             if (_controller.Status.State != SharingState.Running)
             {
                 _lastPairingExpiresAt = null;
@@ -198,6 +209,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             _displayedPairing = snapshot;
             _lastPairingExpiresAt = snapshot.ExpiresAtUtc;
+            PairingAddress = snapshot.Payload.LanAddress;
+            PairingPort = snapshot.Payload.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            PairingCode = snapshot.Payload.PairingCode;
+            HasPairingDetails = true;
             QrImage = Services.QrCodeService.CreatePng(snapshot.Payload.ToJson());
         }
         var remaining = snapshot.ExpiresAtUtc - _timeProvider.GetUtcNow();

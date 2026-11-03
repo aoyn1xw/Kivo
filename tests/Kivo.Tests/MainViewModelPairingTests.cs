@@ -19,15 +19,19 @@ public sealed class MainViewModelPairingTests
             using (var reopened = new MainViewModel(fixture.Controller, () => { }, Dispatcher.CurrentDispatcher, fixture.Time))
             {
                 Assert.Same(first, fixture.Controller.PairingSnapshot);
+                Assert.Equal(vm.PairingCode, reopened.PairingCode);
             }
             fixture.Controller.PauseSharingAsync().GetAwaiter().GetResult();
             vm.RefreshAll();
             Assert.Null(vm.QrImage);
+            Assert.Empty(vm.PairingCode);
             Assert.False(vm.RegeneratePairingCommand.CanExecute(null));
             fixture.Controller.ResumeSharingAsync().GetAwaiter().GetResult();
             vm.RefreshAll();
             Assert.NotNull(vm.QrImage);
             Assert.NotSame(firstImage, vm.QrImage);
+            Assert.NotEqual(first.Payload.PairingCode, vm.PairingCode);
+            Assert.Equal(fixture.Controller.PairingSnapshot!.Payload.PairingCode, vm.PairingCode);
             Assert.Contains("10 min", vm.PairingHint);
         });
     }
@@ -45,16 +49,29 @@ public sealed class MainViewModelPairingTests
             vm.RefreshAll();
             Assert.Same(image, vm.QrImage);
             var first = fixture.Controller.PairingSnapshot!;
+            Assert.Equal(first.Payload.PairingCode, vm.PairingCode);
+            Assert.Equal(first.Payload.LanAddress, vm.PairingAddress);
+            Assert.Equal(first.Payload.Port.ToString(System.Globalization.CultureInfo.InvariantCulture), vm.PairingPort);
+            Assert.True(vm.HasPairingDetails);
+            Assert.True(fixture.Pairing.Exchange(first.Payload.PairingCode, "phone").Success);
             vm.RefreshPairing();
             Assert.Null(vm.QrImage);
             Assert.Contains("no longer available", vm.PairingHint);
+            Assert.False(vm.HasPairingDetails);
+            Assert.Empty(vm.PairingCode);
+            Assert.Empty(vm.PairingAddress);
+            Assert.Empty(vm.PairingPort);
             vm.RegeneratePairingCommand.Execute(null);
             Assert.NotNull(vm.QrImage);
             Assert.NotSame(image, vm.QrImage);
+            Assert.Equal(fixture.Controller.PairingSnapshot!.Payload.PairingCode, vm.PairingCode);
+            Assert.NotEqual(first.Payload.PairingCode, vm.PairingCode);
             fixture.Time.Advance(TimeSpan.FromMinutes(10));
             vm.RefreshPairing();
             Assert.Null(vm.QrImage);
             Assert.Contains("expired", vm.PairingHint);
+            Assert.False(vm.HasPairingDetails);
+            Assert.Empty(vm.PairingCode);
         });
         await fixture.Controller.PauseSharingAsync();
         await StaTest.Run(() =>

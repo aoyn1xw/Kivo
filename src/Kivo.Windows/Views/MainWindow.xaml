@@ -103,6 +103,19 @@
                                FontSize="11"
                                Width="150"
                                TextAlignment="Center" />
+                    <StackPanel Width="150" Margin="0,8,0,0"
+                                Visibility="{Binding HasPairingDetails, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Label Content="PC address" Target="{Binding ElementName=PairingAddressField}" Padding="0,2" />
+                        <TextBox x:Name="PairingAddressField" Text="{Binding PairingAddress, Mode=OneWay}"
+                                 IsReadOnly="True" AutomationProperties.Name="PC address" />
+                        <Label Content="Port" Target="{Binding ElementName=PairingPortField}" Padding="0,2" />
+                        <TextBox x:Name="PairingPortField" Text="{Binding PairingPort, Mode=OneWay}"
+                                 IsReadOnly="True" AutomationProperties.Name="Port" />
+                        <Label Content="Pairing code" Target="{Binding ElementName=PairingCodeField}" Padding="0,2" />
+                        <TextBox x:Name="PairingCodeField" Text="{Binding PairingCode, Mode=OneWay}"
+                                 IsReadOnly="True" FontFamily="Consolas" FontWeight="SemiBold"
+                                 AutomationProperties.Name="Pairing code" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </Grid>
