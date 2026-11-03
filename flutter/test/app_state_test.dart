@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kivo/core/app_state.dart';
+import 'package:kivo/core/diagnostics.dart';
 import 'package:kivo/core/models.dart';
 import 'package:kivo/core/shadowplay_api.dart';
 
@@ -135,6 +136,72 @@ void main() {
       expect(state.getFailure(null, sharedClipId), isNull,
           reason: 'the b failure must not surface while a is active');
     });
+  });
+
+  group('offline library without paired PCs', () {
+    test('completed onboarding is independent of connection count', () {
+      for (final completed in [false, true]) {
+        for (final count in [0, 1, 2]) {
+          final state = AppState.forTesting(preferences,
+              connections: [device(serverA), device(serverB)].take(count).toList(),
+              onboardingCompleted: completed);
+          expect(state.needsOnboarding, !completed);
+          state.dispose();
+        }
+      }
+    });
+
+    test('forget last PC retains downloads and restores them on relaunch', () async {
+      final directory = await Directory.systemTemp.createTemp('kivo-offline-');
+      addTearDown(() => directory.delete(recursive: true));
+      final file = await File('${directory.path}/local.mp4').writeAsBytes([1, 2, 3]);
+      final clip = DownloadedClip(id: 'local', fileName: 'local.mp4', sizeBytes: 3,
+          lastWriteTimeUtc: DateTime.utc(2026), localPath: file.path);
+      await preferences.setBool('onboardingCompleted', true);
+      await preferences.setStringList('downloadedClips', [jsonEncode(clip.toJson())]);
+      final storage = _FakeSecureStorage()..store['token_a'] = 'tokA';
+      final state = AppState.forTesting(preferences,
+          connections: [device(serverA)], activeServerId: 'a', activeToken: 'tokA',
+          secureStorage: storage, onboardingCompleted: true, downloadedClips: [clip]);
+      state.gallerySavedIds.add(clip.id);
+      await state.forget(state.active!);
+      expect(state.needsOnboarding, isFalse);
+      expect(state.active, isNull);
+      expect(state.clipsLoading, isFalse);
+      expect(state.clipLoadError, isNull);
+      expect(state.lastSyncUtc, isNull);
+      expect(storage.store.containsKey('token_a'), isFalse);
+      expect(state.downloadedClips.single.localPath, file.path);
+      expect(state.gallerySavedIds, contains(clip.id));
+      expect(await file.readAsBytes(), [1, 2, 3]);
+      final restored = await AppState.load(diagnostics: Diagnostics());
+      expect(restored.needsOnboarding, isFalse);
+      expect(restored.connections, isEmpty);
+      expect(restored.downloadedClips.single.localPath, file.path);
+      state.dispose();
+      restored.dispose();
+    });
+
+    for (final fail in [false, true]) {
+      test('late ${fail ? "failure" : "success"} after forgetting last PC is discarded', () async {
+        final state = AppState.forTesting(preferences,
+            connections: [device(serverA)], activeServerId: 'a', activeToken: 'tokA',
+            secureStorage: _FakeSecureStorage(), onboardingCompleted: true);
+        serverA.gate();
+        serverA.failAfterRelease = fail;
+        final refresh = state.refreshClips();
+        await serverA.requestReceived.future;
+        await state.forget(state.active!);
+        serverA.release();
+        await refresh;
+        expect(state.clipsLoading, isFalse);
+        expect(state.remoteClips, isEmpty);
+        expect(state.deviceStatuses, isEmpty);
+        expect(state.serverInfos, isEmpty);
+        expect(state.clipLoadError, isNull);
+        state.dispose();
+      });
+    }
   });
 
   group('pairing trust', () {
@@ -274,6 +341,7 @@ class _ScriptedServer {
 
   late final HttpServer _http;
   Completer<void>? _gate;
+  final requestReceived = Completer<void>();
 
   /// When true, /server responds with 500 after [release].
   bool failAfterRelease = false;
@@ -305,6 +373,7 @@ class _ScriptedServer {
       return;
     }
 
+    if (!requestReceived.isCompleted) requestReceived.complete();
     final pending = _gate;
     if (pending != null) {
       await pending.future;

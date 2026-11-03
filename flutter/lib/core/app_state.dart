@@ -153,7 +153,7 @@ class AppState extends ChangeNotifier {
         ShadowPlayApi(connection, token);
   }
 
-  bool get needsOnboarding => connections.isEmpty || !onboardingCompleted;
+  bool get needsOnboarding => !onboardingCompleted;
 
   DeviceStatus get activeStatus => active == null
       ? const DeviceStatus.offline('No PC paired')
@@ -347,6 +347,13 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> forget(Connection connection) async {
+    // Invalidate the active library before awaiting storage or token removal.
+    if (activeServerId == connection.serverId) {
+      ++_refreshGeneration;
+      clipsLoading = false;
+      clipLoadError = null;
+      lastSyncUtc = null;
+    }
     await _secureStorage.delete(key: 'token_${connection.serverId}');
     _tokenCache.remove(connection.serverId);
     cancelTransfersForDevice(connection.serverId);

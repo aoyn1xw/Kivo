@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
 import '../clips/clips_screen.dart';
 import '../home/home_screen.dart';
+import '../onboarding/onboarding_flow.dart';
 import '../settings/settings_screen.dart';
 
 class MainShell extends StatefulWidget {
@@ -54,6 +55,19 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  Future<void> _pairPc() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (routeContext) => OnboardingFlow(
+        state: widget.state,
+        showIntro: false,
+        onFinished: () async {
+          if (routeContext.mounted) Navigator.of(routeContext).pop();
+        },
+      ),
+    ));
+    if (mounted) await widget.state.refreshDeviceStatuses();
+  }
+
   void _selectTab(int index) {
     setState(() => _index = index);
     if (index == 1) widget.state.refreshClips(silent: true);
@@ -69,8 +83,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               HomeScreen(
                 state: widget.state,
                 onViewRecordings: () => _selectTab(1),
+                onPairPc: _pairPc,
               ),
-              ClipsScreen(state: widget.state),
+              ClipsScreen(state: widget.state, onPairPc: _pairPc),
               SettingsScreen(state: widget.state),
             ],
           ),

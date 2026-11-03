@@ -15,28 +15,32 @@ class HomeScreen extends StatelessWidget {
   const HomeScreen({
     required this.state,
     this.onViewRecordings,
+    this.onPairPc,
     super.key,
   });
 
   final AppState state;
   final VoidCallback? onViewRecordings;
+  final VoidCallback? onPairPc;
 
   @override
   Widget build(BuildContext context) {
     final active = state.active;
-    if (active == null) {
-      return const EmptyState(
-        icon: Icons.desktop_access_disabled,
-        title: 'No PC paired',
-        message: 'Pair a PC from Settings to sync clips.',
-      );
-    }
     return RefreshIndicator(
       onRefresh: state.refreshClips,
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-          SliverToBoxAdapter(
+          if (active == null)
+            SliverToBoxAdapter(
+              child: EmptyState(
+                icon: Icons.desktop_access_disabled,
+                title: 'No PC paired',
+                message: 'Downloaded clips remain available offline.',
+                action: FilledButton(onPressed: onPairPc, child: const Text('Pair a PC')),
+              ),
+            ),
+          if (active != null) SliverToBoxAdapter(
             child: DeviceHeader(
               connection: active,
               status: state.activeStatus,
@@ -44,7 +48,7 @@ class HomeScreen extends StatelessWidget {
               title: 'Kivo',
             ),
           ),
-          SliverToBoxAdapter(
+          if (active != null) SliverToBoxAdapter(
             child: _NewRecordingsCard(
               newCount: state.newClipCount,
               pcName: active.computerName,
@@ -103,7 +107,7 @@ class HomeScreen extends StatelessWidget {
                       context,
                       clip,
                       state,
-                      active.computerName,
+                      active?.computerName ?? 'your PC',
                     ),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(

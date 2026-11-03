@@ -9,8 +9,9 @@ import '../../shared/recording_row.dart';
 import '../player/player_screen.dart';
 
 class ClipsScreen extends StatefulWidget {
-  const ClipsScreen({required this.state, super.key});
+  const ClipsScreen({required this.state, this.onPairPc, super.key});
   final AppState state;
+  final VoidCallback? onPairPc;
 
   @override
   State<ClipsScreen> createState() => _ClipsScreenState();
@@ -46,10 +47,11 @@ class _ClipsScreenState extends State<ClipsScreen> {
   Widget build(BuildContext context) {
     final active = widget.state.active;
     if (active == null) {
-      return const EmptyState(
+      return EmptyState(
         icon: Icons.desktop_access_disabled,
         title: 'No PC paired',
-        message: 'Open Settings to pair a PC.',
+        message: 'Pair a PC to browse its recordings. Downloaded clips are on Home.',
+        action: FilledButton(onPressed: widget.onPairPc, child: const Text('Pair a PC')),
       );
     }
 
