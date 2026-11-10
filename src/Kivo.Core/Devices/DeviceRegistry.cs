@@ -30,7 +30,10 @@ public sealed class DeviceRegistry : IDeviceRegistry
                 tokenHash,
                 _timeProvider.GetUtcNow());
 
-            _settings.Update(data => data.Devices.Add(device));
+            if (!_settings.TryUpdate(data => data.Devices.Add(device)))
+            {
+                throw new IOException("The paired device could not be saved. Check Windows profile permissions and free space, then try pairing again.");
+            }
             return device;
         }
     }
@@ -62,12 +65,12 @@ public sealed class DeviceRegistry : IDeviceRegistry
         lock (_sync)
         {
             var removed = false;
-            _settings.Update(data =>
+            var saved = _settings.TryUpdate(data =>
             {
                 var count = data.Devices.RemoveAll(d => d.DeviceId == deviceId);
                 removed = count > 0;
             });
-            return removed;
+            return saved && removed;
         }
     }
 

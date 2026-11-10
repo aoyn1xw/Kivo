@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RootNamespace>Kivo.Desktop</RootNamespace>
+    <AssemblyName>Kivo</AssemblyName>
+    <UseWinUI>true</UseWinUI>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsAppSDKDeploymentManagerInitialize>false</WindowsAppSDKDeploymentManagerInitialize>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>../../flutter/windows/runner/resources/app_icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- Reference NotifyIcon without importing WPF's XAML compiler targets. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+    <!-- WinUI component version shipped by Windows App SDK 1.8.260921001.
+         Avoid the umbrella package's unused AI, ML and Widgets components. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260803003" />
+    <!-- App-local text rendering is required by WinUI at runtime. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" Version="1.8.25122902" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
+    <PackageReference Include="QRCoder" Version="1.8.1" />
+    <ProjectReference Include="../Kivo.Core/Kivo.Core.csproj" />
+    <ProjectReference Include="../Kivo.Api/Kivo.Api.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Transitional reuse: compile the same UI-free implementation in both hosts. -->
+    <Compile Include="../Kivo.Windows/Services/AppController.cs" Link="Hosting/AppController.cs" />
+    <Compile Include="../Kivo.Windows/Services/WindowsFirewallService.cs" Link="Hosting/WindowsFirewallService.cs" />
+    <Compile Include="../Kivo.Windows/Services/WindowsClipPreviewProvider.cs" Link="Hosting/WindowsClipPreviewProvider.cs" />
+    <Compile Include="../Kivo.Windows/Infrastructure/RollingFileLogger.cs" Link="Hosting/RollingFileLogger.cs" />
+    <Compile Include="../Kivo.Windows/Bootstrap/SingleInstanceGuard.cs" Link="Hosting/SingleInstanceGuard.cs" />
+    <Compile Include="../Kivo.Windows/Bootstrap/CliOptions.cs" Link="Hosting/CliOptions.cs" />
+    <Compile Include="../Kivo.Windows/Bootstrap/SmokeRunner.cs" Link="Hosting/SmokeRunner.cs" />
+    <Content Include="../../flutter/windows/runner/resources/app_icon.ico" Link="Assets/app.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <!-- The WinUI resource index is generated during Build, after SDK publish
+       item discovery. Headless smoke alone cannot detect its omission. -->
+  <Target Name="PublishWinUIResources" AfterTargets="ComputeFilesToPublish">
+    <Error Condition="!Exists('$(TargetDir)$(TargetName).pri')" Text="The WinUI resource index was not generated. Build before publishing." />
+    <ItemGroup>
+      <ResolvedFileToPublish Include="$(TargetDir)$(TargetName).pri">
+        <RelativePath>$(TargetName).pri</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+</Project>

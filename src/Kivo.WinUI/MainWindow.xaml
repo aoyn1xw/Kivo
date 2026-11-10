@@ -1,0 +1,31 @@
+<Window x:Class="Kivo.Desktop.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid x:Name="Root" Background="{StaticResource AppBackground}" RequestedTheme="Dark">
+        <NavigationView x:Name="Navigation" PaneDisplayMode="Left" OpenPaneLength="208"
+            IsBackButtonVisible="Collapsed" IsSettingsVisible="True"
+            SelectionChanged="OnNavigationChanged" Background="{StaticResource AppBackground}">
+            <NavigationView.PaneHeader>
+                <StackPanel Margin="16,22,0,22" Spacing="3">
+                    <TextBlock Text="kivo" FontSize="27" FontWeight="SemiBold" />
+                    <TextBlock Text="LOCAL RECORDING SERVER" FontSize="10" CharacterSpacing="100" Style="{StaticResource Caption}" />
+                </StackPanel>
+            </NavigationView.PaneHeader>
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="Overview" Tag="overview" Icon="Home" />
+                <NavigationViewItem Content="Recordings" Tag="recordings" Icon="Folder" />
+                <NavigationViewItem Content="Devices" Tag="devices" Icon="CellPhone" />
+            </NavigationView.MenuItems>
+            <NavigationView.PaneFooter>
+                <TextBlock x:Name="FooterCopy" Visibility="Collapsed" Text="Original quality.&#x0a;Your local network." Margin="16,16,8,22" Style="{StaticResource Caption}" />
+            </NavigationView.PaneFooter>
+            <Grid Padding="28,24,28,24">
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <InfoBar x:Name="Notice" IsOpen="False" Severity="Error" Margin="0,0,0,16" />
+                <ScrollViewer x:Name="PageScroll" Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <ContentControl x:Name="PageHost" HorizontalContentAlignment="Stretch" MaxWidth="920" VerticalContentAlignment="Top" />
+                </ScrollViewer>
+            </Grid>
+        </NavigationView>
+    </Grid>
+</Window>
