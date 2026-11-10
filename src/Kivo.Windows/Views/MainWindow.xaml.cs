@@ -13,14 +13,29 @@ public partial class MainWindow : Window
     public MainWindow(App app, MainViewModel viewModel)
     {
         InitializeComponent();
+        // The view owns confirmation dialogs; devices can never be revoked here
+        // without an explicit confirmation naming the device.
+        viewModel.ConfirmDeviceRevocation ??= ConfirmDeviceRevocation;
         _app = app;
         DataContext = viewModel;
     }
 
+<<<<<<< Updated upstream
     protected override void OnClosed(EventArgs e)
     {
         ((MainViewModel)DataContext).Dispose();
         base.OnClosed(e);
+=======
+    private Task<bool> ConfirmDeviceRevocation(string deviceName)
+    {
+        var result = System.Windows.MessageBox.Show(
+            $"Revoke {deviceName}? This device will immediately lose access to your recordings and will need a new pairing code to connect again.",
+            "Revoke device",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning,
+            MessageBoxResult.Cancel);
+        return Task.FromResult(result == MessageBoxResult.OK);
+>>>>>>> Stashed changes
     }
 
     /// <summary>Closing hides to tray; only explicit Exit terminates the process.</summary>

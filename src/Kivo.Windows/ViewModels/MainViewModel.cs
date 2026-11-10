@@ -21,7 +21,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 {
     private readonly AppController _controller;
     private readonly Action _openSettings;
-    private readonly Dispatcher _dispatcher;
+    private readonly Dispatcher? _dispatcher;
     private ImageSource? _qrImage;
     private string _statusText = "Starting...";
     private string? _statusDetail;
@@ -42,6 +42,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _pairingCode = "";
     private bool _hasPairingDetails;
 
+    /// <summary>
+    /// Shows a confirmation for revoking the named device; returns true when the
+    /// user confirms. The desktop view supplies a dialog; a null callback keeps
+    /// the legacy direct-revoke behavior for composition sites without a dialog.
+    /// </summary>
+    public Func<string, Task<bool>>? ConfirmDeviceRevocation { get; set; }
+
     public MainViewModel(AppController controller, Action openSettings)
         : this(controller, openSettings, Application.Current.Dispatcher, TimeProvider.System)
     {
@@ -51,6 +58,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _openSettings = openSettings ?? throw new ArgumentNullException(nameof(openSettings));
+<<<<<<< Updated upstream
         _dispatcher = dispatcher;
         _timeProvider = timeProvider;
         _stateChangedHandler = () =>
@@ -67,6 +75,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         };
         _pairingTimer.Tick += OnPairingTick;
         _pairingTimer.Start();
+=======
+        _dispatcher = Application.Current?.Dispatcher;
+
+        _controller.StateChanged += () => _dispatcher?.BeginInvoke(RefreshAll);
+>>>>>>> Stashed changes
 
         RefreshAll();
     }
@@ -122,13 +135,35 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public ICommand OpenFolderCommand => new RelayCommand(() => _controller.OpenRecordingsFolderInExplorer());
 
     public ICommand RevokeDeviceCommand => new RelayCommand<string>(deviceId =>
+        _ = RevokeDeviceAsync(deviceId));
+
+    /// <summary>
+    /// Revokes the selected device only after the user confirms. Cancellation
+    /// must leave the device paired, and the command refreshes the device list
+    /// whenever a revocation succeeds.
+    /// </summary>
+    public async Task RevokeDeviceAsync(string? deviceId)
     {
-        if (deviceId is not null)
+        if (deviceId is null)
         {
-            _controller.RevokeDevice(deviceId);
-            RefreshDevices();
+            return;
         }
-    });
+
+        var confirm = ConfirmDeviceRevocation;
+        if (confirm is not null)
+        {
+            var deviceName = _controller.PairedDevices
+                .FirstOrDefault(device => device.DeviceId == deviceId)?.Name
+                ?? "this device";
+            if (!await confirm(deviceName))
+            {
+                return;
+            }
+        }
+
+        _controller.RevokeDevice(deviceId);
+        RefreshDevices();
+    }
 
     /// <summary>Refreshes everything from the controller. Must run on the UI thread.</summary>
     public void RefreshAll()

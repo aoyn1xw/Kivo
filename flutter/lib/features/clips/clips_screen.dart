@@ -28,17 +28,29 @@ class _ClipsScreenState extends State<ClipsScreen> {
     if (!mounted) return;
     setState(
         () => _selectedIds.removeWhere(widget.state.downloadedIds.contains));
-    final failures =
-        selected.where((clip) => widget.state.isFailedClip(clip.id)).length;
+    final failed =
+        selected.where((clip) => widget.state.isFailedClip(clip.id)).toList();
     final galleryFailures = selected
         .where((clip) => widget.state.gallerySaveFailures.containsKey(clip.id))
         .length;
-    final message = failures > 0
-        ? '$failures ${failures == 1 ? 'download' : 'downloads'} failed. Tap to retry.'
-        : galleryFailures > 0
-            ? 'Downloaded! Note: $galleryFailures clip${galleryFailures == 1 ? '' : 's'} could not be exported to Photos/Gallery.'
-            : 'Download complete. Original files transferred to phone.';
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    if (failed.isNotEmpty) {
+      final noun = failed.length == 1 ? 'download' : 'downloads';
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('${failed.length} $noun failed.'),
+          action: SnackBarAction(
+            label: 'Retry failed',
+            onPressed: () => widget.state.downloadClips(failed),
+          ),
+        ),
+      );
+      return;
+    }
+    final message = galleryFailures > 0
+        ? 'Downloaded! Note: $galleryFailures clip${galleryFailures == 1 ? '' : 's'} could not be exported to Photos/Gallery.'
+        : 'Download complete. Original files transferred to phone.';
+    messenger.showSnackBar(
       SnackBar(content: Text(message)),
     );
   }
@@ -146,90 +158,166 @@ class _ClipsScreenState extends State<ClipsScreen> {
         ),
       );
     }
-    return SliverList.builder(
-      itemCount: clips.length,
-      itemBuilder: (context, index) {
-        final clip = clips[index];
-        final selected = _selectedIds.contains(clip.id);
-        final isDownloaded = widget.state.downloadedIds.contains(clip.id);
-        final isDownloading = widget.state.isDownloadingClip(clip.id);
-        final progress = widget.state.getProgress(widget.state.active, clip.id);
-        final failure = widget.state.getFailure(widget.state.active, clip.id);
+    final offline =
+        widget.state.activeStatus.availability == DeviceAvailability.offline;
+    return SliverMainAxisGroup(
+      slivers: [
+        if (offline)
+          SliverToBoxAdapter(
+            child: _StaleLibraryBanner(
+              detail: widget.state.clipLoadError,
+              onRetry: widget.state.refreshClips,
+            ),
+          ),
+        SliverList.builder(
+          itemCount: clips.length,
+          itemBuilder: (context, index) {
+            final clip = clips[index];
+            final selected = _selectedIds.contains(clip.id);
+            final isDownloaded = widget.state.downloadedIds.contains(clip.id);
+            final isDownloading = widget.state.isDownloadingClip(clip.id);
+            final progress =
+                widget.state.getProgress(widget.state.active, clip.id);
+            final failure =
+                widget.state.getFailure(widget.state.active, clip.id);
 
-        final downloadedClip = isDownloaded
-            ? widget.state.downloadedClips
-                .firstWhere((item) => item.id == clip.id)
-            : null;
-        final canStreamRemotely = !(widget.state.active?.usesTls ?? false);
+            final downloadedClip = isDownloaded
+                ? widget.state.downloadedClips
+                    .firstWhere((item) => item.id == clip.id)
+                : null;
+            final canStreamRemotely = !(widget.state.active?.usesTls ?? false);
 
-        return _RemoteClipCard(
-          clip: clip,
-          loadThumbnail: widget.state.loadThumbnail,
-          selected: selected,
-          isDownloaded: isDownloaded,
-          isDownloading: isDownloading,
-          progress: progress,
-          failed: failure,
-          canStreamRemotely: canStreamRemotely,
-          onCancelDownload: () => widget.state.cancelDownload(clip.id),
-          onTap: () {
-            if (isDownloaded && downloadedClip != null) {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => PlayerScreen.local(
-                    clip: downloadedClip,
-                    diagnostics: widget.state.diagnostics,
-                  ),
-                ),
-              );
-            } else if (!isDownloading) {
-              setState(() {
-                if (selected) {
-                  _selectedIds.remove(clip.id);
-                } else {
-                  _selectedIds.add(clip.id);
+            return _RemoteClipCard(
+              clip: clip,
+              loadThumbnail: widget.state.loadThumbnail,
+              selected: selected,
+              isDownloaded: isDownloaded,
+              isDownloading: isDownloading,
+              progress: progress,
+              failed: failure,
+              canStreamRemotely: canStreamRemotely,
+              onCancelDownload: () => widget.state.cancelDownload(clip.id),
+              onTap: () {
+                if (isDownloaded && downloadedClip != null) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => PlayerScreen.local(
+                        clip: downloadedClip,
+                        diagnostics: widget.state.diagnostics,
+                      ),
+                    ),
+                  );
+                } else if (!isDownloading) {
+                  setState(() {
+                    if (selected) {
+                      _selectedIds.remove(clip.id);
+                    } else {
+                      _selectedIds.add(clip.id);
+                    }
+                  });
                 }
-              });
-            }
-          },
-          onDownloadSingle: () async {
-            await widget.state.downloadClips([clip]);
-          },
-          onPlay: () {
-            if (isDownloaded && downloadedClip != null) {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => PlayerScreen.local(
-                    clip: downloadedClip,
-                    diagnostics: widget.state.diagnostics,
+              },
+              onDownloadSingle: () async {
+                await widget.state.downloadClips([clip]);
+              },
+              onPlay: () {
+                if (isDownloaded && downloadedClip != null) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => PlayerScreen.local(
+                        clip: downloadedClip,
+                        diagnostics: widget.state.diagnostics,
+                      ),
+                    ),
+                  );
+                  return;
+                }
+                if (!canStreamRemotely) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                          'This PC uses an encrypted connection. Download the clip to play it on this device.'),
+                    ),
+                  );
+                  return;
+                }
+                final api = widget.state.api;
+                if (api == null) return;
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PlayerScreen.remote(
+                      clip: clip,
+                      api: api,
+                      diagnostics: widget.state.diagnostics,
+                    ),
                   ),
-                ),
-              );
-              return;
-            }
-            if (!canStreamRemotely) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                      'This PC uses an encrypted connection. Download the clip to play it on this device.'),
-                ),
-              );
-              return;
-            }
-            final api = widget.state.api;
-            if (api == null) return;
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => PlayerScreen.remote(
-                  clip: clip,
-                  api: api,
-                  diagnostics: widget.state.diagnostics,
-                ),
-              ),
+                );
+              },
             );
           },
-        );
-      },
+        ),
+      ],
+    );
+  }
+}
+
+/// Shown when cached recordings remain after a failed refresh: the list stays
+/// usable, but clearly marked as unverified with a way to retry.
+class _StaleLibraryBanner extends StatelessWidget {
+  const _StaleLibraryBanner({required this.detail, required this.onRetry});
+
+  final String? detail;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      header: true,
+      child: Material(
+        color: colors.errorContainer,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.wifi_off, size: 20, color: colors.onErrorContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'PC offline · showing the last loaded recordings',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colors.onErrorContainer,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    if (detail != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        detail!,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: colors.onErrorContainer
+                                .withValues(alpha: 0.85)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                style: TextButton.styleFrom(
+                    foregroundColor: colors.onErrorContainer),
+                onPressed: onRetry,
+                child: const Text('Try Again'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -269,7 +357,7 @@ class _RemoteClipCard extends StatelessWidget {
 
     String? statusMessage;
     if (failed != null) {
-      statusMessage = 'Download failed. Tap to retry.';
+      statusMessage = 'Download failed.';
     } else if (isDownloaded) {
       statusMessage = 'Downloaded · Available offline';
     }
@@ -333,33 +421,65 @@ class _RemoteClipCard extends StatelessWidget {
                     ),
                   ],
                 )
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: 'Download ${clip.fileName}',
-                      style: IconButton.styleFrom(
-                        backgroundColor: colors.primaryContainer,
-                        foregroundColor: colors.onPrimaryContainer,
-                      ),
-                      onPressed: onDownloadSingle,
-                      icon: const Icon(Icons.download, size: 20),
+              : failed != null
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Tooltip(
+                          message: 'Retry download ${clip.fileName}',
+                          child: FilledButton.tonalIcon(
+                            onPressed: onDownloadSingle,
+                            icon: const Icon(Icons.refresh, size: 18),
+                            label: const Text('Retry'),
+                            style: FilledButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 10),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          tooltip: selected
+                              ? 'Deselect ${clip.fileName}'
+                              : 'Select ${clip.fileName}',
+                          onPressed: onTap,
+                          icon: Icon(
+                            selected
+                                ? Icons.check_circle
+                                : Icons.radio_button_unchecked,
+                          ),
+                          color: selected ? colors.primary : colors.outline,
+                        ),
+                      ],
+                    )
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Download ${clip.fileName}',
+                          style: IconButton.styleFrom(
+                            backgroundColor: colors.primaryContainer,
+                            foregroundColor: colors.onPrimaryContainer,
+                          ),
+                          onPressed: onDownloadSingle,
+                          icon: const Icon(Icons.download, size: 20),
+                        ),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          tooltip: selected
+                              ? 'Deselect ${clip.fileName}'
+                              : 'Select ${clip.fileName}',
+                          onPressed: onTap,
+                          icon: Icon(
+                            selected
+                                ? Icons.check_circle
+                                : Icons.radio_button_unchecked,
+                          ),
+                          color: selected ? colors.primary : colors.outline,
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 4),
-                    IconButton(
-                      tooltip: selected
-                          ? 'Deselect ${clip.fileName}'
-                          : 'Select ${clip.fileName}',
-                      onPressed: onTap,
-                      icon: Icon(
-                        selected
-                            ? Icons.check_circle
-                            : Icons.radio_button_unchecked,
-                      ),
-                      color: selected ? colors.primary : colors.outline,
-                    ),
-                  ],
-                ),
     );
   }
 }
