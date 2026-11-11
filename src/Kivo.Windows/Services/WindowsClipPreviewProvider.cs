@@ -1,8 +1,7 @@
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Interop;
-using System.Windows.Media.Imaging;
+using System.Drawing;
+using System.Drawing.Imaging;
 using Kivo.Core.Clips;
 using Kivo.Core.Models;
 
@@ -90,17 +89,9 @@ public sealed class WindowsClipPreviewProvider : IClipPreviewProvider
                 return null;
             }
 
-            var source = Imaging.CreateBitmapSourceFromHBitmap(
-                bitmap,
-                IntPtr.Zero,
-                Int32Rect.Empty,
-                BitmapSizeOptions.FromEmptyOptions());
-            source.Freeze();
-
-            var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(source));
+            using var source = Image.FromHbitmap(bitmap);
             using var output = new MemoryStream();
-            encoder.Save(output);
+            source.Save(output, ImageFormat.Png);
             return output.ToArray();
         }
         catch (COMException)

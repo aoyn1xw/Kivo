@@ -87,6 +87,28 @@ jobs:
             throw "expected 2 clips to be detected"
           }
 
+      - name: Publish WinUI desktop candidate
+        run: >
+          dotnet publish src/Kivo.WinUI/Kivo.WinUI.csproj
+          -c Release -r win-x64 --self-contained false
+          -o publish/winui-x64
+
+      - name: Smoke test WinUI desktop candidate
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "publish/winui-x64/Kivo.pri" -PathType Leaf)) {
+            throw "Published WinUI XAML resource index is missing"
+          }
+          $clips = Join-Path $env:RUNNER_TEMP "smoke-clips"
+          $data = Join-Path $env:RUNNER_TEMP "winui-smoke-data"
+          $out = & ".\publish\winui-x64\Kivo.exe" `
+            --smoke --folder $clips --port 0 --smoke-seconds 12 `
+            --data-directory $data | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0 -or $out -notmatch 'SMOKE_OK' -or $out -notmatch '"clips":2') {
+            throw "WinUI candidate smoke failed with exit code $LASTEXITCODE"
+          }
+
   flutter-checks:
     name: Flutter checks
     runs-on: ubuntu-latest

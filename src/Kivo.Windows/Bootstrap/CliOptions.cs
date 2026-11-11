@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace Kivo.Windows.Bootstrap;
 
 /// <summary>Parses the small command-line surface (used for diagnostics/smoke runs).</summary>
@@ -11,6 +13,11 @@ public sealed record CliOptions
 
     public int? Port { get; private init; }
 
+    public bool Background { get; private init; }
+
+    /// <summary>Isolates diagnostic runs from the user's normal settings.</summary>
+    public string? DataDirectory { get; private init; }
+
     public static CliOptions Parse(string[] args)
     {
         var options = new CliOptions();
@@ -18,6 +25,12 @@ public sealed record CliOptions
         {
             switch (args[i].ToLowerInvariant())
             {
+                case "--background":
+                    options = options with { Background = true };
+                    break;
+                case "--data-directory" when i + 1 < args.Length:
+                    options = options with { DataDirectory = Path.GetFullPath(args[++i]) };
+                    break;
                 case "--smoke":
                     options = options with { SmokeTest = true };
                     break;

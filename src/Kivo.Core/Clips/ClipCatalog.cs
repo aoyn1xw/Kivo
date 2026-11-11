@@ -6,6 +6,8 @@ namespace Kivo.Core.Clips;
 /// <summary>Read-only view of the clip catalog.</summary>
 public interface IClipCatalog
 {
+    int Count { get; }
+
     /// <summary>All known clips, newest first.</summary>
     IReadOnlyList<ClipEntry> GetClips();
 
@@ -36,6 +38,8 @@ public sealed class ClipCatalog : IClipCatalog, IClipStore
 {
     private readonly ConcurrentDictionary<string, ClipEntry> _clips = new();
     private Action? _changed;
+
+    public int Count => _clips.Count;
 
     public event Action? Changed
     {

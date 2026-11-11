@@ -27,15 +27,16 @@ public static class AppHostFactory
     public static IHost Build(CliOptions cli)
     {
         var host = Host.CreateApplicationBuilder();
+        var baseDirectory = cli.DataDirectory ?? DefaultBaseDirectory;
 
         // Logging: our own rotating file log; no console spam in a windowed app.
         host.Logging.ClearProviders();
-        host.Logging.AddKivoFileLog(LogsDirectory);
+        host.Logging.AddKivoFileLog(Path.Combine(baseDirectory, "logs"));
 
         var services = host.Services;
 
         services.AddSingleton(TimeProvider.System);
-        services.AddSingleton<ISettingsStore>(_ => new JsonSettingsStore(DefaultBaseDirectory));
+        services.AddSingleton<ISettingsStore>(_ => new JsonSettingsStore(baseDirectory));
         services.AddSingleton<SettingsService>();
         services.AddSingleton<ISettingsService>(sp => sp.GetRequiredService<SettingsService>());
         services.AddSingleton<IFolderValidator, FolderValidator>();
@@ -50,7 +51,7 @@ public static class AppHostFactory
         // when sharing starts and skipped (HTTP-only) when unavailable.
         services.AddSingleton<IHttpsIdentityService, HttpsIdentityService>();
         services.AddSingleton<IClipPreviewProvider>(_ =>
-            new WindowsClipPreviewProvider(Path.Combine(DefaultBaseDirectory, "thumbnails")));
+            new WindowsClipPreviewProvider(Path.Combine(baseDirectory, "thumbnails")));
         services.AddSingleton<AppController>();
 
         services.AddSingleton(sp => new TrayIconService(sp.GetRequiredService<AppController>()));
@@ -74,6 +75,7 @@ public static class AppHostFactory
             if (cli.Folder is not null)
             {
                 data.RecordingsFolder = Path.GetFullPath(cli.Folder);
+                data.RecordingDirectories.Clear();
             }
 
             if (cli.Port is not null)

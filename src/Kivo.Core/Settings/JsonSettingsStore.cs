@@ -14,6 +14,14 @@ public interface ISettingsService
 
     void Update(Action<AppSettingsData> mutate);
 
+    /// <summary>Attempts to persist a mutation. File-backed settings commit the snapshot only after saving.</summary>
+    bool TryUpdate(Action<AppSettingsData> mutate)
+    {
+        // Compatibility fallback for alternate settings implementations.
+        Update(mutate);
+        return Save();
+    }
+
     /// <summary>Replaces the entire data set (e.g. after loading or CLI overrides).</summary>
     void Replace(AppSettingsData data);
 
@@ -116,13 +124,25 @@ public sealed class SettingsService : ISettingsService
         }
     }
 
-    public void Update(Action<AppSettingsData> mutate)
+    public void Update(Action<AppSettingsData> mutate) => TryUpdate(mutate);
+
+    public bool TryUpdate(Action<AppSettingsData> mutate)
     {
         ArgumentNullException.ThrowIfNull(mutate);
         lock (_sync)
         {
-            mutate(_current);
-            SaveCore();
+            var candidate = Clone(_current);
+            mutate(candidate);
+            try
+            {
+                _store.Save(Clone(candidate));
+                _current = Clone(candidate);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
         }
     }
 
