@@ -20,9 +20,12 @@ public sealed class ClipMonitorService : IAsyncDisposable
 
     private readonly ConcurrentQueue<string> _pendingPaths = new();
     private readonly SemaphoreSlim _startStop = new(1, 1);
+    private readonly object _watcherSync = new();
 
     private CancellationTokenSource? _cts;
     private RecordingWatcher? _watcher;
+    private Task? _watcherRestart;
+    private bool _stopping = true;
     private EventDebouncer? _debouncer;
     private List<Task> _loops = [];
     private StabilityTracker _tracker = new();
@@ -53,7 +56,7 @@ public sealed class ClipMonitorService : IAsyncDisposable
 
     public bool IsRunning { get; private set; }
 
-    /// <summary>Starts monitoring. Safe to call multiple times (idempotent).</summary>
+    /// <summary>Starts watching immediately; initial discovery runs in the background. Idempotent.</summary>
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         await _startStop.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -75,14 +78,18 @@ public sealed class ClipMonitorService : IAsyncDisposable
 
             _debouncer = new EventDebouncer(_timeProvider, _options.DebounceDelay, EnqueueCandidate);
             _tracker = new StabilityTracker(_options);
-
-            await ScanAndReconcileAsync(root, initial: true, ct).ConfigureAwait(false);
+            _pendingPaths.Clear();
+            _activeRoot = null;
+            lock (_watcherSync)
+            {
+                _stopping = false;
+            }
             StartWatcher(root);
 
             _loops =
             [
                 Task.Run(() => PollLoopAsync(ct), CancellationToken.None),
-                Task.Run(() => ReconcileLoopAsync(ct), CancellationToken.None),
+                Task.Run(() => InitialScanAndReconcileLoopAsync(root, ct), CancellationToken.None),
             ];
 
             IsRunning = true;
@@ -94,7 +101,7 @@ public sealed class ClipMonitorService : IAsyncDisposable
         }
     }
 
-    /// <summary>Stops all background work cleanly, honouring cancellation.</summary>
+    /// <summary>Cancels background work and waits for it to finish before releasing monitoring resources.</summary>
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         await _startStop.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -105,6 +112,15 @@ public sealed class ClipMonitorService : IAsyncDisposable
                 return;
             }
 
+            Task? watcherRestart;
+            lock (_watcherSync)
+            {
+                _stopping = true;
+                _watcher?.Dispose();
+                _watcher = null;
+                watcherRestart = _watcherRestart;
+            }
+
             if (_cts is not null)
             {
                 await _cts.CancelAsync().ConfigureAwait(false);
@@ -112,20 +128,19 @@ public sealed class ClipMonitorService : IAsyncDisposable
 
             try
             {
-                await Task.WhenAll(_loops).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                _logger?.LogWarning("Monitor loops did not stop within the grace period");
+                // Do not dispose state while cancelled scan/poll tasks still reference it.
+                await Task.WhenAll(_loops).ConfigureAwait(false);
+                if (watcherRestart is not null)
+                {
+                    await watcherRestart.ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {
-                // Caller gave up waiting; proceed with teardown.
+                // The monitor's cancellation is expected during shutdown.
             }
 
-            _watcher?.Dispose();
-            _watcher = null;
+            _watcherRestart = null;
             _debouncer?.Dispose();
             _debouncer = null;
             _cts?.Dispose();
@@ -155,71 +170,104 @@ public sealed class ClipMonitorService : IAsyncDisposable
 
     private void StartWatcher(string root)
     {
-        _watcher = new RecordingWatcher(root, new RecordingWatcherHandlers
+        lock (_watcherSync)
         {
-            CreatedOrChanged = path =>
+            if (_stopping || _cts is null || _cts.IsCancellationRequested)
             {
-                if (IsRelevantPath(path))
-                {
-                    _debouncer?.Post(path);
-                }
-            },
-            Deleted = path => RemoveFromCatalog(path),
-            Renamed = (oldPath, newPath) =>
-            {
-                RemoveFromCatalog(oldPath);
-                if (IsRelevantPath(newPath))
-                {
-                    _debouncer?.Post(newPath);
-                }
-            },
-            Error = ex =>
-            {
-                _logger?.LogWarning(ex, "File watcher error; periodic reconciliation will recover missed events");
-                RestartWatcherSoon(root);
-            },
-        });
+                return;
+            }
 
-        try
-        {
-            _watcher.Start();
-        }
-        catch (Exception ex) when (ex is IOException or ArgumentException)
-        {
-            _logger?.LogWarning(ex, "Could not start the file watcher; relying on reconciliation");
-            _watcher.Dispose();
-            _watcher = null;
+            var watcherToken = _cts.Token;
+            _watcher?.Dispose();
+            _watcher = new RecordingWatcher(root, new RecordingWatcherHandlers
+            {
+                CreatedOrChanged = path =>
+                {
+                    lock (_watcherSync)
+                    {
+                        if (!_stopping && !watcherToken.IsCancellationRequested && IsRelevantPath(path))
+                        {
+                            _debouncer?.Post(path);
+                        }
+                    }
+                },
+                Deleted = path =>
+                {
+                    lock (_watcherSync)
+                    {
+                        if (!_stopping && !watcherToken.IsCancellationRequested) RemoveFromCatalog(path);
+                    }
+                },
+                Renamed = (oldPath, newPath) =>
+                {
+                    lock (_watcherSync)
+                    {
+                        if (_stopping || watcherToken.IsCancellationRequested) return;
+                        RemoveFromCatalog(oldPath);
+                        if (IsRelevantPath(newPath)) _debouncer?.Post(newPath);
+                    }
+                },
+                Error = ex =>
+                {
+                    lock (_watcherSync)
+                    {
+                        if (_stopping || watcherToken.IsCancellationRequested) return;
+                        _logger?.LogWarning(ex, "File watcher error; periodic reconciliation will recover missed events");
+                        RestartWatcherSoon(root);
+                    }
+                },
+            });
+
+            try
+            {
+                _watcher.Start();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                _logger?.LogWarning(ex, "Could not start the file watcher; relying on reconciliation");
+                _watcher.Dispose();
+                _watcher = null;
+            }
         }
     }
 
     private void RestartWatcherSoon(string root)
     {
-        // Recreate on a background thread with a small delay to survive transient failures.
-        Task.Run(async () =>
+        lock (_watcherSync)
         {
-            try
+            if (_stopping || _cts is null || _watcherRestart is { IsCompleted: false })
             {
-                await Task.Delay(TimeSpan.FromSeconds(2), GetToken()).ConfigureAwait(false);
-                if (!Directory.Exists(root))
+                return;
+            }
+
+            // Capture this lifetime's token. A queued restart must not attach to a later start.
+            var ct = _cts.Token;
+            _watcherRestart = Task.Run(async () =>
+            {
+                try
                 {
-                    return;
+                    await Task.Delay(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
+                    lock (_watcherSync)
+                    {
+                        if (_stopping || ct.IsCancellationRequested || !Directory.Exists(root))
+                        {
+                            return;
+                        }
+
+                        StartWatcher(root);
+                    }
+                    _logger?.LogInformation("File watcher restarted");
                 }
-
-                _watcher?.Dispose();
-                StartWatcher(root);
-                _logger?.LogInformation("File watcher restarted");
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogDebug(ex, "Watcher restart failed");
-            }
-        }, CancellationToken.None);
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogDebug(ex, "Watcher restart failed");
+                }
+            }, CancellationToken.None);
+        }
     }
-
-    private CancellationToken GetToken() => _cts?.Token ?? new CancellationToken(true);
 
     private static bool IsRelevantPath(string path) =>
         !RecordingScanner.IsTempRecordingName(path)
@@ -371,21 +419,43 @@ public sealed class ClipMonitorService : IAsyncDisposable
         }
     }
 
+    private async Task InitialScanAndReconcileLoopAsync(string root, CancellationToken ct)
+    {
+        try
+        {
+            await ScanAndReconcileAsync(root, initial: true, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger?.LogWarning("The initial recording scan could not read the selected folder");
+            RootUnavailable?.Invoke(root);
+        }
+
+        await ReconcileLoopAsync(ct).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Full scan of the folder tree. Existing catalog entries are refreshed or removed;
     /// new/changed files are fed through the stability tracker instead of being published blindly.
     /// </summary>
     private async Task ScanAndReconcileAsync(string root, bool initial, CancellationToken ct)
     {
-        await Task.Yield(); // Ensure async semantics even for fast scans.
-
-        var scanned = RecordingScanner.Scan(root, ct);
+        // Only reconcile entries known before enumeration. Watcher publication may add new
+        // clips while a large scan runs; those must not be mistaken for vanished files.
+        var previousEntries = _store.Snapshot();
+        // Filesystem enumeration must never capture a desktop synchronization context.
+        var scanned = await Task.Run(() => RecordingScanner.Scan(root, ct), ct).ConfigureAwait(false);
         _activeRoot = root;
 
         var scannedIds = new HashSet<string>(scanned.Count, StringComparer.Ordinal);
 
         foreach (var (fullPath, sizeBytes, lastWriteUtc) in scanned)
         {
+            ct.ThrowIfCancellationRequested();
             var id = ClipIdCalculator.Calculate(fullPath);
             scannedIds.Add(id);
 
@@ -406,8 +476,9 @@ public sealed class ClipMonitorService : IAsyncDisposable
         }
 
         // Remove catalog entries whose files have vanished.
-        foreach (var entry in _store.Snapshot())
+        foreach (var entry in previousEntries)
         {
+            ct.ThrowIfCancellationRequested();
             if (!scannedIds.Contains(entry.Id))
             {
                 RemoveFromCatalog(entry.FullPath);

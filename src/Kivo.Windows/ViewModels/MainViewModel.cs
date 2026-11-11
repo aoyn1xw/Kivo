@@ -50,7 +50,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public Func<string, Task<bool>>? ConfirmDeviceRevocation { get; set; }
 
     public MainViewModel(AppController controller, Action openSettings)
-        : this(controller, openSettings, Application.Current.Dispatcher, TimeProvider.System)
+        : this(controller, openSettings, Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher, TimeProvider.System)
     {
     }
 

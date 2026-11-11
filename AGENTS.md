@@ -4,10 +4,11 @@
 
 Kivo (formerly ShadowPlay) is an unofficial Windows tray app that watches completed `.mp4` recordings and serves original files over the LAN to a Flutter Android/iOS client. No NVIDIA installation is needed to build or test.
 
-- `Kivo.sln`: three production C# projects and one test project.
+- `Kivo.sln`: `src/Kivo.Core`, `src/Kivo.Api`, `src/Kivo.Windows`, `src/Kivo.WinUI`, and `tests/Kivo.Tests`.
 - `src/Kivo.Core/`: UI-free monitoring, clip catalog, pairing, devices, settings, and HTTPS identity.
 - `src/Kivo.Api/`: ASP.NET Core/Kestrel library hosted by the desktop app; endpoints, DTOs, bearer authentication, and private-network middleware. Not a standalone executable.
-- `src/Kivo.Windows/`: WPF UI, WinForms tray icon, Windows services. Startup is `App.xaml.cs`; `Bootstrap/AppHostFactory.cs` composes dependencies; `Services/AppController.cs` manages sharing.
+- `src/Kivo.Windows/`: WPF UI, WinForms tray icon, Windows services. This is the release and default installer host. Startup is `App.xaml.cs`; `Bootstrap/AppHostFactory.cs` composes dependencies; `Services/AppController.cs` manages sharing.
+- `src/Kivo.WinUI/`: unpackaged WinUI 3 candidate host that runs side by side with WPF. It is not the release or default installer host. See [`docs/WINUI_MIGRATION.md`](docs/WINUI_MIGRATION.md) and [`docs/development-handoff.md`](docs/development-handoff.md).
 - `tests/Kivo.Tests/`: xUnit unit tests and real Kestrel HTTP/HTTPS integration tests, including Windows internals.
 - `flutter/lib/`: `main.dart` entry point, `app/` app composition, `core/` state/API/downloads/storage, `features/` screens, and `shared/` widgets. Tests live in `flutter/test/`.
 - `flutter/android/`, `flutter/ios/`: native hosts and permissions; iOS has custom media export via the `shadowplay/media` method channel. `flutter/windows/` is a Flutter runner, not the C# desktop app; its icon is also used by WPF.
@@ -55,7 +56,7 @@ Use `flutter devices` to select an emulator or device. Pair a physical phone wit
 - Windows Firewall migration: `WindowsFirewallService` accepts only the exact legacy `ShadowPlay LAN API (Private)` name or canonical `ShadowPlay LAN API (Private) TCP <port>` names (1 through 65535), in discovery and script generation, classifies rules pointing at the pre-rebrand `ShadowPlay.exe` as legacy, and migrates them only through the user-approved elevated repair ("Allow private LAN access"). Rules must stay private-profile, TCP, exact-port, exact-program; `FirewallRuleScriptTests`/`FirewallRuleMigrationTests` guard the script shape.
 - Keep Core UI-free and Windows integration in the Windows project. Follow existing C# four-space indentation, PascalCase members, camelCase locals, nullable references, and structured logging. `Directory.Build.props` sets shared analyzers/version; `.csproj` files declare NuGet dependencies. Tests use descriptive snake_case names.
 - Dart follows `flutter_lints` (`analysis_options.yaml`) and `dart format`; dependencies are in `pubspec.yaml`/`pubspec.lock`. Native manifests, entitlements, and platform channels matter for permissions, storage, and media export.
-- `ci.yml` checks main pushes/PRs/manual runs: Windows build/tests/publish/smoke, Flutter analyze/tests, Android debug, and unsigned iOS. `release.yml` publishes Windows/Android from main/version tags; `ios-ota.yml` handles signed OTA separately. Prefer source and workflow files over stale README claims.
+- `ci.yml` checks main pushes/PRs/manual runs: Windows build/tests, WPF publish/smoke, a separate unpackaged WinUI publish/smoke, Flutter analyze/tests, Android debug, and unsigned iOS. WPF (`src/Kivo.Windows`) remains the release and default installer host; WinUI notes are in [`docs/WINUI_MIGRATION.md`](docs/WINUI_MIGRATION.md) and [`docs/development-handoff.md`](docs/development-handoff.md). `release.yml` publishes Windows/Android from main/version tags; `ios-ota.yml` handles signed OTA separately. Prefer source and workflow files over stale README claims.
 
 ## Hard rules and done when
 
