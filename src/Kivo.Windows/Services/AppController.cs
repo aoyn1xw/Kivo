@@ -53,11 +53,19 @@ public sealed class AppController : IAsyncDisposable
     private readonly IHttpsIdentityService? _httpsIdentity;
     private readonly ILogger<AppController>? _logger;
 
+    private const string SettingsSaveFailedDetail =
+        "Settings could not be saved. Check that your Windows profile has free space and write permission.";
+
+    private const string NothingWatchedDetail =
+        "No recording folders are being watched. Check that each folder exists and is readable.";
+
     private WebApplication? _apiApp;
-    private readonly List<ClipMonitorService> _monitors = [];
+    private readonly List<WatchedRoot> _monitors = [];
     private readonly ConcurrentDictionary<string, string> _directoryErrors = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private readonly MonitorOptions _monitorOptions;
     private bool _disposed;
+    private bool _sharingWatchFault;
     private int _actualPort;
     private volatile PairingDisplaySnapshot? _pairingSnapshot;
 
@@ -76,7 +84,8 @@ public sealed class AppController : IAsyncDisposable
         IWindowsFirewallService firewall,
         IClipPreviewProvider clipPreview,
         IHttpsIdentityService? httpsIdentity = null,
-        ILogger<AppController>? logger = null)
+        ILogger<AppController>? logger = null,
+        MonitorOptions? monitorOptions = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
@@ -87,6 +96,7 @@ public sealed class AppController : IAsyncDisposable
         _clipPreview = clipPreview ?? throw new ArgumentNullException(nameof(clipPreview));
         _httpsIdentity = httpsIdentity;
         _logger = logger;
+        _monitorOptions = monitorOptions ?? new MonitorOptions();
 
         _catalog.Changed += NotifyStateChanged;
     }
@@ -123,7 +133,8 @@ public sealed class AppController : IAsyncDisposable
     /// <summary>
     /// Applies folder + port + sharing preference from the settings dialog and
     /// restarts sharing so they take effect immediately. Returns false on failure
-    /// (validation or bind error); <see cref="Status.Detail"/> carries a friendly message.
+    /// (validation, settings save, or bind error); <see cref="Status.Detail"/> carries a friendly message.
+    /// A failed save leaves the previous snapshot and sharing state in place.
     /// </summary>
     public async Task<bool> ApplySettingsAsync(string? folder, int port, bool sharingEnabled)
     {
@@ -140,7 +151,7 @@ public sealed class AppController : IAsyncDisposable
             return false;
         }
 
-        _settings.Update(data =>
+        var saved = _settings.TryUpdate(data =>
         {
             var directories = RecordingConfiguration.GetDirectories(data).ToList();
             var source = directories.FirstOrDefault()?.Source ?? "custom";
@@ -150,7 +161,12 @@ public sealed class AppController : IAsyncDisposable
             data.Port = port;
             data.SharingEnabled = sharingEnabled;
         });
+        if (!saved)
+        {
+            return ReportSettingsSaveFailure();
+        }
 
+        ConfigurationError = null;
         await RestartSharingAsync().ConfigureAwait(false);
 
         if (Status.State == SharingState.Error)
@@ -229,7 +245,7 @@ public sealed class AppController : IAsyncDisposable
 
             if (!_settings.TryUpdate(data => RecordingConfiguration.Replace(data, normalized, completeOnboarding)))
             {
-                ConfigurationError = "Settings could not be saved. Check that your Windows profile has free space and write permission.";
+                ConfigurationError = SettingsSaveFailedDetail;
                 return false;
             }
 
@@ -256,6 +272,24 @@ public sealed class AppController : IAsyncDisposable
         try
         {
             if (!_disposed) await operation().ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    private async Task<bool> RunExclusiveAsync(Func<Task<bool>> operation)
+    {
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed)
+            {
+                return false;
+            }
+
+            return await operation().ConfigureAwait(false);
         }
         finally
         {
@@ -365,6 +399,7 @@ public sealed class AppController : IAsyncDisposable
             }
 
             _directoryErrors.Clear();
+            _sharingWatchFault = false;
             foreach (var directory in directories)
             {
                 var root = directory.Path;
@@ -374,25 +409,24 @@ public sealed class AppController : IAsyncDisposable
                     _directoryErrors[root] = validation.Error ?? "Folder unavailable. Check its location and read permission.";
                     continue;
                 }
+
                 var monitor = new ClipMonitorService(
                     () => root, new ScopedClipStore(_catalog, root), TimeProvider.System,
-                    logger: _logger, previewProvider: _clipPreview);
-                monitor.RootUnavailable += _ =>
-                {
-                    _directoryErrors[root] = "Folder unavailable. Check the drive and read permission, then restart sharing.";
-                    NotifyStateChanged();
-                };
-                monitor.RootRecovered += recoveredRoot =>
-                {
-                    _directoryErrors.TryRemove(root, out _);
-                    NotifyStateChanged();
-                };
-                _monitors.Add(monitor);
+                    _monitorOptions, logger: _logger, previewProvider: _clipPreview);
+                monitor.RootUnavailable += _ => OnRootUnavailable(root);
+                monitor.RootRecovered += _ => OnRootRecovered(root);
+                _monitors.Add(new WatchedRoot(root, monitor));
                 await monitor.StartAsync().ConfigureAwait(false);
             }
 
-            // Fresh offer so the QR code in the UI is immediately usable.
+            // Fresh offer so the QR code in the UI is immediately usable once a folder is watched.
             CreatePairingSnapshot();
+            if (!IsAnyFolderWatched())
+            {
+                _sharingWatchFault = true;
+                SetStatus(new ControllerStatus(SharingState.Error, DescribeNothingWatched(), _actualPort));
+                return;
+            }
 
             SetStatus(new ControllerStatus(SharingState.Running, null, _actualPort));
         }
@@ -482,17 +516,27 @@ public sealed class AppController : IAsyncDisposable
         }
     }
 
-    public Task PauseSharingAsync() => RunExclusiveAsync(async () =>
+    public Task<bool> PauseSharingAsync() => RunExclusiveAsync(async () =>
     {
+        if (!_settings.TryUpdate(d => d.SharingEnabled = false))
+        {
+            return ReportSettingsSaveFailure();
+        }
+
         await StopCoreAsync().ConfigureAwait(false);
-        _settings.Update(d => d.SharingEnabled = false);
         SetStatus(ControllerStatus.Paused);
+        return true;
     });
 
-    public Task ResumeSharingAsync() => RunExclusiveAsync(async () =>
+    public Task<bool> ResumeSharingAsync() => RunExclusiveAsync(async () =>
     {
-        _settings.Update(d => d.SharingEnabled = true);
+        if (!_settings.TryUpdate(d => d.SharingEnabled = true))
+        {
+            return ReportSettingsSaveFailure();
+        }
+
         await StartSharingCoreAsync().ConfigureAwait(false);
+        return Status.State != SharingState.Error;
     });
 
     public Task RestartSharingAsync() => RunExclusiveAsync(async () =>
@@ -508,16 +552,14 @@ public sealed class AppController : IAsyncDisposable
         }
     });
 
-    public async Task ToggleSharingAsync()
+    public async Task<bool> ToggleSharingAsync()
     {
         if (IsSharingRunning)
         {
-            await PauseSharingAsync().ConfigureAwait(false);
+            return await PauseSharingAsync().ConfigureAwait(false);
         }
-        else
-        {
-            await ResumeSharingAsync().ConfigureAwait(false);
-        }
+
+        return await ResumeSharingAsync().ConfigureAwait(false);
     }
 
     /// <summary>A read never creates or extends an offer, or advertises a stopped listener.</summary>
@@ -636,11 +678,12 @@ public sealed class AppController : IAsyncDisposable
 
     private async Task StopCoreAsync()
     {
+        _sharingWatchFault = false;
         _pairingSnapshot = null;
         StateChanged?.Invoke();
-        foreach (var monitor in _monitors)
+        foreach (var watched in _monitors)
         {
-            await monitor.DisposeAsync().ConfigureAwait(false);
+            await watched.Monitor.DisposeAsync().ConfigureAwait(false);
         }
         _monitors.Clear();
 
@@ -702,6 +745,79 @@ public sealed class AppController : IAsyncDisposable
             ? "Could not bind the local network port. Try changing the port in settings."
             : "Sharing failed to start. See local logs for details.";
 
+    private void OnRootUnavailable(string root)
+    {
+        _directoryErrors[root] = "Folder unavailable. Check the drive and read permission, then restart sharing.";
+        PublishWatchStatus();
+    }
+
+    private void OnRootRecovered(string root)
+    {
+        _directoryErrors.TryRemove(root, out _);
+        PublishWatchStatus();
+    }
+
+    /// <summary>
+    /// WPF reads <see cref="Status"/> and not <see cref="DirectoryErrors"/>.
+    /// A partial outage stays <see cref="SharingState.Running"/>; a total outage becomes <see cref="SharingState.Error"/>.
+    /// </summary>
+    private void PublishWatchStatus()
+    {
+        if (_apiApp is null || Status.State is SharingState.Paused or SharingState.NotConfigured or SharingState.Starting)
+        {
+            NotifyStateChanged();
+            return;
+        }
+
+        if (IsAnyFolderWatched())
+        {
+            if (_sharingWatchFault && Status.State == SharingState.Error)
+            {
+                _sharingWatchFault = false;
+                SetStatus(new ControllerStatus(SharingState.Running, null, _actualPort));
+                return;
+            }
+
+            NotifyStateChanged();
+            return;
+        }
+
+        _sharingWatchFault = true;
+        var detail = DescribeNothingWatched();
+        if (Status.State == SharingState.Error && Status.Detail == detail)
+        {
+            NotifyStateChanged();
+            return;
+        }
+
+        SetStatus(new ControllerStatus(SharingState.Error, detail, _actualPort));
+    }
+
+    private bool IsAnyFolderWatched()
+    {
+        foreach (var watched in _monitors)
+        {
+            if (watched.Monitor.IsRunning && !_directoryErrors.ContainsKey(watched.Root))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private string DescribeNothingWatched() =>
+        _directoryErrors.Count == 1
+            ? _directoryErrors.Values.First()
+            : NothingWatchedDetail;
+
+    private bool ReportSettingsSaveFailure()
+    {
+        ConfigurationError = SettingsSaveFailedDetail;
+        SetStatus(new ControllerStatus(Status.State, SettingsSaveFailedDetail, Status.Port));
+        return false;
+    }
+
     private void SetStatus(ControllerStatus status)
     {
         Status = status;
@@ -725,6 +841,8 @@ public sealed class AppController : IAsyncDisposable
             _lifecycle.Release();
         }
     }
+
+    private sealed record WatchedRoot(string Root, ClipMonitorService Monitor);
 
     private sealed class StaticServerInfo(string serverId, string computerName) : IServerInfoProvider
     {
