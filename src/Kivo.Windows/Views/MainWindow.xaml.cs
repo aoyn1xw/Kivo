@@ -20,12 +20,6 @@ public partial class MainWindow : Window
         DataContext = viewModel;
     }
 
-<<<<<<< Updated upstream
-    protected override void OnClosed(EventArgs e)
-    {
-        ((MainViewModel)DataContext).Dispose();
-        base.OnClosed(e);
-=======
     private Task<bool> ConfirmDeviceRevocation(string deviceName)
     {
         var result = System.Windows.MessageBox.Show(
@@ -35,7 +29,12 @@ public partial class MainWindow : Window
             MessageBoxImage.Warning,
             MessageBoxResult.Cancel);
         return Task.FromResult(result == MessageBoxResult.OK);
->>>>>>> Stashed changes
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        ((MainViewModel)DataContext).Dispose();
+        base.OnClosed(e);
     }
 
     /// <summary>Closing hides to tray; only explicit Exit terminates the process.</summary>

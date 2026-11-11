@@ -58,7 +58,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _openSettings = openSettings ?? throw new ArgumentNullException(nameof(openSettings));
-<<<<<<< Updated upstream
         _dispatcher = dispatcher;
         _timeProvider = timeProvider;
         _stateChangedHandler = () =>
@@ -75,11 +74,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         };
         _pairingTimer.Tick += OnPairingTick;
         _pairingTimer.Start();
-=======
-        _dispatcher = Application.Current?.Dispatcher;
-
-        _controller.StateChanged += () => _dispatcher?.BeginInvoke(RefreshAll);
->>>>>>> Stashed changes
 
         RefreshAll();
     }
