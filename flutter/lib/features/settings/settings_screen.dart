@@ -149,22 +149,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: const Text('Keeps the original files on your PC'),
             onTap: _confirmClearDownloads,
           ),
-          const _SectionLabel('Notifications'),
-          SwitchListTile(
-            secondary: const Icon(Icons.video_library_outlined),
-            title: const Text('New clips'),
-            subtitle: const Text('Notify when new PC clips are available'),
-            value: widget.state.newClipNotifications,
-            onChanged: widget.state.setNewClipNotifications,
-          ),
-          SwitchListTile(
-            secondary: const Icon(Icons.download_done),
-            title: const Text('Downloads complete'),
-            subtitle:
-                const Text('Notify when selected clips finish downloading'),
-            value: widget.state.downloadNotifications,
-            onChanged: widget.state.setDownloadNotifications,
-          ),
           const _SectionLabel('Appearance'),
           ListTile(
             leading: const Icon(Icons.contrast),

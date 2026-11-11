@@ -18,7 +18,7 @@
         <TextBlock TextWrapping="Wrap"
                    Foreground="#555555"
                    Margin="0,0,0,16"
-                   Text="Pick the folder where NVIDIA App / GeForce Experience saves your game recordings (for example Videos or a custom capture folder). Kivo only reads this folder - it never changes, moves or deletes anything." />
+                   Text="Pick the folder where your games save finished .mp4 recordings - for example the NVIDIA App / GeForce Experience recordings folder. Kivo watches this folder for completed recordings and shares them with your phone over your local Wi-Fi. Kivo only reads it - it never changes, moves or deletes anything." />
 
         <DockPanel Margin="0,0,0,8">
             <Button DockPanel.Dock="Right"

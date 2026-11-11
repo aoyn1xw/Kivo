@@ -14,16 +14,28 @@ enum _OnboardingStep { intro, permission, pairing, success }
 
 enum _PairMode { qr, manual }
 
+/// Signature for the outgoing PC health probe used by the pairing preflight.
+/// Production code uses [ShadowPlayApi.health]; tests may inject a scripted
+/// probe (the same pattern as AppState's transport factory seam).
+typedef PairingHealthCheck = Future<void> Function({
+  required String address,
+  required int port,
+  bool useTls,
+  String? pinnedCertSha256,
+});
+
 class OnboardingFlow extends StatefulWidget {
   const OnboardingFlow({
     required this.state,
     required this.onFinished,
     this.showIntro = true,
+    this.pairingHealthCheck,
     super.key,
   });
 
   final AppState state;
   final Future<void> Function() onFinished;
+  final PairingHealthCheck? pairingHealthCheck;
   final bool showIntro;
 
   @override
@@ -76,6 +88,7 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
               ),
             _OnboardingStep.pairing => _PairingPage(
                 state: widget.state,
+                healthCheck: widget.pairingHealthCheck,
                 onPaired: () => setState(() => _step = _OnboardingStep.success),
               ),
             _OnboardingStep.success => _SuccessPage(
@@ -184,8 +197,13 @@ class _SetupPage extends StatelessWidget {
 }
 
 class _PairingPage extends StatefulWidget {
-  const _PairingPage({required this.state, required this.onPaired});
+  const _PairingPage({
+    required this.state,
+    required this.healthCheck,
+    required this.onPaired,
+  });
   final AppState state;
+  final PairingHealthCheck? healthCheck;
   final VoidCallback onPaired;
 
   @override
@@ -205,8 +223,14 @@ class _PairingPageState extends State<_PairingPage>
   bool _scanning = false;
   bool _busy = false;
   bool _preflightBusy = false;
-  bool _preflightPassed = false;
   bool _pinRejected = false;
+
+  /// The exact endpoint and trust parameters that a completed preflight
+  /// validated. Pairing is only offered while the current fields still match,
+  /// so edits always require a fresh check.
+  ({String address, int port, String? pin})? _validatedTarget;
+  int _preflightGeneration = 0;
+  int _busyGeneration = 0;
   AppPermissionState _permissionState = AppPermissionState.unknown;
   String? _error;
   final _localNetworkPermissions = const LocalNetworkPermissionService();
@@ -215,6 +239,8 @@ class _PairingPageState extends State<_PairingPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _address.addListener(_connectionFieldsEdited);
+    _port.addListener(_connectionFieldsEdited);
     _scannerController = MobileScannerController(
       formats: const [BarcodeFormat.qrCode],
       detectionSpeed: DetectionSpeed.noDuplicates,
@@ -224,6 +250,8 @@ class _PairingPageState extends State<_PairingPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _address.removeListener(_connectionFieldsEdited);
+    _port.removeListener(_connectionFieldsEdited);
     _address.dispose();
     _port.dispose();
     _code.dispose();
@@ -232,17 +260,47 @@ class _PairingPageState extends State<_PairingPage>
     super.dispose();
   }
 
+  void _connectionFieldsEdited() {
+    if (_preflightGeneration == 0 && _validatedTarget == null) return;
+    setState(() {
+      _validatedTarget = null;
+      _preflightGeneration++;
+      // A superseded check must not keep the pending indicator alive.
+      _preflightBusy = false;
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed &&
         _payload != null &&
-        !_preflightPassed &&
+        !_validated &&
         !_pinRejected &&
         !_preflightBusy &&
         !_busy) {
       unawaited(_runPreflight());
     }
   }
+
+  /// The address, port and trust parameters used for the next preflight or
+  /// pairing exchange, or null when they are incomplete.
+  ({String address, int port, String? pin})? get _currentTarget {
+    final port = int.tryParse(_port.text);
+    final address = _address.text.trim();
+    if (address.isEmpty || port == null || port < 1 || port > 65535) {
+      return null;
+    }
+    final pin = _payload?.tlsPinned == true
+        ? normalizeFingerprint(_payload!.certSha256)
+        : null;
+    return (address: address, port: port, pin: pin);
+  }
+
+  /// True while a completed preflight still matches the current fields.
+  bool get _validated =>
+      !_preflightBusy &&
+      _validatedTarget != null &&
+      _validatedTarget == _currentTarget;
 
   void _handleCapture(BarcodeCapture capture) {
     for (final barcode in capture.barcodes) {
@@ -257,7 +315,7 @@ class _PairingPageState extends State<_PairingPage>
           _payload = payload;
           _pinRejected = false;
           _scanning = false;
-          _preflightPassed = false;
+          _validatedTarget = null;
           _permissionState = AppPermissionState.unknown;
           _address.text = payload.address;
           _port.text = payload.port.toString();
@@ -275,18 +333,18 @@ class _PairingPageState extends State<_PairingPage>
   }
 
   Future<void> _pair() async {
-    final port = int.tryParse(_port.text);
-    if (_address.text.trim().isEmpty ||
-        port == null ||
-        port < 1 ||
-        port > 65535 ||
-        _code.text.trim().isEmpty) {
+    if (_code.text.trim().isEmpty) {
       setState(() => _error = 'Enter the PC address, port, and pairing code.');
       return;
     }
-    final pin = _payload?.tlsPinned == true
-        ? normalizeFingerprint(_payload!.certSha256)
-        : null;
+    final target = _currentTarget;
+    if (target == null || _validatedTarget != target) {
+      setState(() => _error =
+          'The PC address or port changed. Run the connection check again before pairing.');
+      return;
+    }
+    final port = target.port;
+    final pin = target.pin;
     final tlsPort = pin != null ? _payload!.httpsPort : null;
     setState(() {
       _busy = true;
@@ -350,7 +408,9 @@ class _PairingPageState extends State<_PairingPage>
               setState(() {
                 _mode = value.first;
                 _scanning = false;
-                _preflightPassed = false;
+                _validatedTarget = null;
+                _preflightGeneration++;
+                _preflightBusy = false;
                 _permissionState = AppPermissionState.unknown;
                 _error = null;
               });
@@ -384,8 +444,7 @@ class _PairingPageState extends State<_PairingPage>
           ],
           const SizedBox(height: 20),
           if (_payload != null || _mode == _PairMode.manual) _preflightAction(),
-          if ((_payload != null || _mode == _PairMode.manual) &&
-              _preflightPassed)
+          if ((_payload != null || _mode == _PairMode.manual) && _validated)
             FilledButton(
               onPressed: _busy ? null : _pair,
               child: Text(_busy ? 'Pairing…' : 'Pair Device'),
@@ -414,7 +473,9 @@ class _PairingPageState extends State<_PairingPage>
             TextButton.icon(
               onPressed: () => setState(() {
                 _payload = null;
-                _preflightPassed = false;
+                _validatedTarget = null;
+                _preflightGeneration++;
+                _preflightBusy = false;
                 _permissionState = AppPermissionState.unknown;
                 _error = null;
               }),
@@ -502,6 +563,15 @@ class _PairingPageState extends State<_PairingPage>
             controller: _deviceName,
             decoration: const InputDecoration(labelText: 'Device name'),
           ),
+          const SizedBox(height: 8),
+          Text(
+            'Manual pairing connects to the address above over your Wi-Fi '
+            'network without certificate verification. Scanning the QR code '
+            'on your PC instead lets the phone verify the PC and use an '
+            'encrypted connection whenever the PC supports one.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
         ],
       );
 
@@ -510,7 +580,7 @@ class _PairingPageState extends State<_PairingPage>
         ? _permissionState == AppPermissionState.requestingPermission
             ? 'Requesting Local Network access…'
             : 'Checking PC connection…'
-        : _preflightPassed
+        : _validated
             ? 'PC reachable on this Wi‑Fi'
             : _mode == _PairMode.qr
                 ? 'Check PC connection again'
@@ -519,10 +589,10 @@ class _PairingPageState extends State<_PairingPage>
       children: [
         OutlinedButton.icon(
           onPressed: _preflightBusy ? null : _runPreflight,
-          icon: Icon(_preflightPassed ? Icons.check : Icons.wifi_find),
+          icon: Icon(_validated ? Icons.check : Icons.wifi_find),
           label: Text(label),
         ),
-        if (!_preflightPassed)
+        if (!_validated)
           const Padding(
             padding: EdgeInsets.only(top: 6),
             child: Text(
@@ -536,38 +606,48 @@ class _PairingPageState extends State<_PairingPage>
 
   Future<void> _runPreflight() async {
     if (_preflightBusy || _busy) return;
-    final port = int.tryParse(_port.text);
-    if (_address.text.trim().isEmpty ||
-        port == null ||
-        port < 1 ||
-        port > 65535) {
+    final target = _currentTarget;
+    if (target == null) {
       if (mounted) {
         setState(() => _error = 'Enter the PC address and port first.');
       }
       return;
     }
+    final generation = ++_preflightGeneration;
 
     setState(() {
       _preflightBusy = true;
-      _preflightPassed = false;
+      _busyGeneration = generation;
+      _validatedTarget = null;
       _permissionState = AppPermissionState.requestingPermission;
       _error = null;
     });
-    final pin = _payload?.tlsPinned == true
-        ? normalizeFingerprint(_payload!.certSha256)
-        : null;
-    final tlsPort = pin != null ? _payload!.httpsPort : null;
+    final pin = target.pin;
+    final tlsPort =
+        pin != null && _payload?.httpsPort != null ? _payload!.httpsPort : null;
     try {
+      final probe = widget.healthCheck;
       final permission = await runPairingPreflight(
         requestPermission: _localNetworkPermissions.requestLocalNetworkAccess,
-        isActive: () => mounted,
-        checkConnection: () => ShadowPlayApi.health(
-          address: _address.text.trim(),
-          port: tlsPort ?? port,
-          useTls: pin != null,
-          pinnedCertSha256: pin,
-        ),
+        isActive: () => mounted && generation == _preflightGeneration,
+        checkConnection: () async {
+          if (probe != null) {
+            return probe(
+              address: target.address,
+              port: tlsPort ?? target.port,
+              useTls: pin != null,
+              pinnedCertSha256: pin,
+            );
+          }
+          await ShadowPlayApi.health(
+            address: target.address,
+            port: tlsPort ?? target.port,
+            useTls: pin != null,
+            pinnedCertSha256: pin,
+          );
+        },
       );
+      if (generation != _preflightGeneration || !mounted) return;
       if (permission != AppPermissionState.granted) {
         widget.state.diagnostics.warning('pairing',
             'Local Network permission not granted before preflight', {
@@ -587,19 +667,30 @@ class _PairingPageState extends State<_PairingPage>
         setState(() => _permissionState = AppPermissionState.granted);
       }
       widget.state.diagnostics.info('pairing', 'PC reachable for pairing', {
-        'address': _address.text.trim(),
-        'port': tlsPort ?? port,
+        'address': target.address,
+        'port': tlsPort ?? target.port,
         'transport': pin != null ? 'HTTPS with pinned certificate' : 'HTTP',
       });
-      if (mounted) setState(() => _preflightPassed = true);
+      if (mounted) {
+        setState(() {
+          if (generation == _preflightGeneration) {
+            _validatedTarget = target;
+          }
+        });
+      }
     } catch (error) {
+      if (generation != _preflightGeneration || !mounted) return;
       widget.state.diagnostics.warning('pairing', 'Pairing preflight failed',
-          {'address': _address.text.trim(), 'error': error.toString()});
+          {'address': target.address, 'error': error.toString()});
       _pinRejected =
           error is ApiException && error.kind == ApiFailureKind.tlsUntrusted;
       if (mounted) setState(() => _error = error.toString());
     } finally {
-      if (mounted) setState(() => _preflightBusy = false);
+      // Only the run that owns the pending indicator clears it; a superseded
+      // run was already cleared by the edit that superseded it.
+      if (mounted && _busyGeneration == generation) {
+        setState(() => _preflightBusy = false);
+      }
     }
   }
 

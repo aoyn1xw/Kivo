@@ -30,8 +30,6 @@ class AppState extends ChangeNotifier {
   static const _onboardingKey = 'onboardingCompleted';
   static const _downloadsKey = 'downloadedClips';
   static const _themeKey = 'themeMode';
-  static const _newClipNotificationsKey = 'newClipNotifications';
-  static const _downloadNotificationsKey = 'downloadNotifications';
   static const _verboseDiagnosticsKey = 'diagnosticsVerbose';
 
   final SharedPreferences _prefs;
@@ -87,8 +85,6 @@ class AppState extends ChangeNotifier {
   DateTime? lastSyncUtc;
   bool clipsLoading = false;
   bool onboardingCompleted = false;
-  bool newClipNotifications = true;
-  bool downloadNotifications = true;
   bool isVerboseDiagnostics = false;
   ThemeMode themeMode = ThemeMode.system;
 
@@ -225,8 +221,6 @@ class AppState extends ChangeNotifier {
     ];
     await _cleanupStagedFiles();
     onboardingCompleted = _prefs.getBool(_onboardingKey) ?? false;
-    newClipNotifications = _prefs.getBool(_newClipNotificationsKey) ?? true;
-    downloadNotifications = _prefs.getBool(_downloadNotificationsKey) ?? true;
     themeMode = switch (_prefs.getString(_themeKey)) {
       'light' => ThemeMode.light,
       'dark' => ThemeMode.dark,
@@ -627,7 +621,6 @@ class AppState extends ChangeNotifier {
           clip,
     ];
     if (targets.isEmpty) return;
-    final batchToken = client.token;
 
     _closeFailureEntries(connection.serverId, targets);
     for (final clip in targets) {
@@ -650,7 +643,7 @@ class AppState extends ChangeNotifier {
           downloadProgress.remove(deviceKey(connection.serverId, clip.id));
           continue;
         }
-        await _downloadClip(connection, clip, token, batchToken);
+        await _downloadClip(connection, clip, token, client);
       }
     }
 
@@ -674,7 +667,7 @@ class AppState extends ChangeNotifier {
     Connection connection,
     Clip clip,
     CancelToken? cancelToken,
-    String apiToken,
+    ShadowPlayApi client,
   ) async {
     final serverId = connection.serverId;
     final key = deviceKey(serverId, clip.id);
@@ -692,8 +685,8 @@ class AppState extends ChangeNotifier {
 
       var lastProgressStep = -1;
       final downloader = ResumableDownloader(
-        openSegment: (rangeStart) => ShadowPlayApi(connection, apiToken)
-            .openDownload(clip, rangeStart: rangeStart),
+        openSegment: (rangeStart) =>
+            client.openDownload(clip, rangeStart: rangeStart),
         partFile: partFile,
         expectedSize: clip.sizeBytes,
         onProgress: (fraction) {
@@ -920,18 +913,6 @@ class AppState extends ChangeNotifier {
   Future<void> setThemeMode(ThemeMode mode) async {
     themeMode = mode;
     await _prefs.setString(_themeKey, mode.name);
-    notifyListeners();
-  }
-
-  Future<void> setNewClipNotifications(bool value) async {
-    newClipNotifications = value;
-    await _prefs.setBool(_newClipNotificationsKey, value);
-    notifyListeners();
-  }
-
-  Future<void> setDownloadNotifications(bool value) async {
-    downloadNotifications = value;
-    await _prefs.setBool(_downloadNotificationsKey, value);
     notifyListeners();
   }
 
