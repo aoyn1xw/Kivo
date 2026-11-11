@@ -196,18 +196,55 @@ public sealed class AppController : IAsyncDisposable
         await StartSharingAsync().ConfigureAwait(false);
     }
 
-    /// <summary>Validates a folder choice; saves it and restarts sharing when valid.</summary>
+    /// <summary>
+    /// Validates a folder and adds it to the configured roots. Existing folders stay.
+    /// A duplicate, nested, invalid, or unsaved choice leaves the previous roots and share in place.
+    /// </summary>
     public async Task<bool> SelectFolderAsync(string? path)
     {
         var result = _validator.Validate(path);
         if (!result.IsValid)
         {
-            SetStatus(new ControllerStatus(SharingState.Error, result.Error));
-            return false;
+            return RejectFolderChoice(result.Error ?? "That folder could not be used.");
         }
 
-        return await ApplyRecordingDirectoriesAsync(
-            [new RecordingDirectory { Path = Path.GetFullPath(path!) }]).ConfigureAwait(false);
+        string fullPath;
+        try
+        {
+            fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path!));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
+        {
+            return RejectFolderChoice("That folder path is not valid.");
+        }
+
+        var directories = RecordingDirectories.ToList();
+        var alreadySaved = directories.Any(directory =>
+            string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory.Path)),
+                fullPath,
+                StringComparison.OrdinalIgnoreCase));
+        if (!alreadySaved)
+        {
+            directories.Add(new RecordingDirectory { Path = fullPath, Source = "custom" });
+        }
+
+        if (await ApplyRecordingDirectoriesAsync(directories).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        return RejectFolderChoice(ConfigurationError ?? "That folder could not be used.");
+    }
+
+    private bool RejectFolderChoice(string detail)
+    {
+        ConfigurationError = detail;
+        var state = Status.State is SharingState.Running or SharingState.Starting or SharingState.Paused
+            ? Status.State
+            : SharingState.Error;
+        SetStatus(new ControllerStatus(state, detail, Status.Port));
+        return false;
     }
 
     public async Task<bool> ApplyRecordingDirectoriesAsync(IEnumerable<RecordingDirectory> directories, bool completeOnboarding = false)

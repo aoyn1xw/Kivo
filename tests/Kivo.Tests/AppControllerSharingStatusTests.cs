@@ -53,6 +53,35 @@ public sealed class AppControllerSharingStatusTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task Select_folder_keeps_existing_roots_when_the_snapshot_cannot_be_saved(bool accessDenied)
+    {
+        await using var fixture = new SharingStatusFixture();
+        var secondRoot = Directory.CreateDirectory(Path.Combine(fixture.Recordings.Path, "second")).FullName;
+        fixture.Configure(
+            new RecordingDirectory { Path = fixture.Root, Source = "nvidia" },
+            new RecordingDirectory { Path = secondRoot, Source = "obs" });
+        await fixture.Controller.InitializeAsync();
+        var livePort = fixture.Controller.Status.Port;
+        var added = Directory.CreateDirectory(Path.Combine(fixture.Recordings.Path, "added")).FullName;
+        fixture.Store.Failure = accessDenied
+            ? new UnauthorizedAccessException("Test denied")
+            : new IOException("Test full disk");
+
+        Assert.False(await fixture.Controller.SelectFolderAsync(added));
+
+        Assert.Equal(SharingState.Running, fixture.Controller.Status.State);
+        Assert.Equal(livePort, fixture.Controller.Status.Port);
+        Assert.Contains("could not be saved", fixture.Controller.Status.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(fixture.Controller.Status.Detail, fixture.Controller.ConfigurationError);
+        Assert.Equal([fixture.Root, secondRoot], fixture.Controller.RecordingDirectories.Select(directory => directory.Path).ToArray());
+        var persisted = new JsonSettingsStore(fixture.SettingsDirectory).Load();
+        Assert.Equal([fixture.Root, secondRoot], persisted.RecordingDirectories.Select(directory => directory.Path).ToArray());
+        Assert.NotNull(fixture.Controller.PairingSnapshot);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task Pause_keeps_sharing_when_the_preference_cannot_be_saved(bool accessDenied)
     {
         await using var fixture = new SharingStatusFixture();

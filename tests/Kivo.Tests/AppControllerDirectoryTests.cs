@@ -195,6 +195,168 @@ public sealed class AppControllerDirectoryTests
     }
 
     [Fact]
+    public async Task Select_folder_adds_a_root_without_removing_the_folders_already_configured()
+    {
+        await using var fixture = new DirectoryControllerFixture();
+        var secondRoot = Directory.CreateDirectory(Path.Combine(fixture.Recordings.Path, "second")).FullName;
+        fixture.Configure(
+            new RecordingDirectory { Path = fixture.FirstRoot, Source = "nvidia" },
+            new RecordingDirectory { Path = secondRoot, Source = "obs" });
+        await fixture.Controller.InitializeAsync();
+        var added = Directory.CreateDirectory(Path.Combine(fixture.Recordings.Path, "added")).FullName;
+
+        Assert.True(await fixture.Controller.SelectFolderAsync(added + Path.DirectorySeparatorChar));
+
+        Assert.Equal(SharingState.Running, fixture.Controller.Status.State);
+        Assert.NotNull(fixture.Controller.PairingSnapshot);
+        Assert.Equal(
+            [fixture.FirstRoot, secondRoot, added],
+            fixture.Controller.RecordingDirectories.Select(directory => directory.Path).ToArray());
+        Assert.Equal("nvidia", fixture.Controller.RecordingDirectories[0].Source);
+        Assert.Equal("obs", fixture.Controller.RecordingDirectories[1].Source);
+        Assert.Equal("custom", fixture.Controller.RecordingDirectories[2].Source);
+        Assert.Equal(fixture.FirstRoot, fixture.Settings.Current.RecordingsFolder);
+        Assert.Equal(added, fixture.Settings.Current.RecordingDirectories[2].Path);
+    }
+
+    [Fact]
+    public async Task Select_folder_with_no_existing_roots_still_saves_that_folder()
+    {
+        await using var fixture = new DirectoryControllerFixture();
+        fixture.Configure();
+
+        Assert.True(await fixture.Controller.SelectFolderAsync(fixture.FirstRoot));
+
+        Assert.Equal(SharingState.Running, fixture.Controller.Status.State);
+        Assert.Equal(fixture.FirstRoot, Assert.Single(fixture.Controller.RecordingDirectories).Path);
+        Assert.Equal("custom", fixture.Controller.RecordingDirectories[0].Source);
+        Assert.Equal(fixture.FirstRoot, fixture.Settings.Current.RecordingsFolder);
+    }
+
+    [Fact]
+    public async Task Select_folder_retries_sharing_after_the_saved_folder_failed_to_start()
+    {
+        await using var fixture = new DirectoryControllerFixture();
+        fixture.Configure();
+        using var listener = new TcpListener(IPAddress.Any, 0);
+        listener.Start();
+        var blockedPort = ((IPEndPoint)listener.LocalEndpoint).Port;
+        fixture.Settings.Update(data => data.Port = blockedPort);
+
+        Assert.False(await fixture.Controller.SelectFolderAsync(fixture.FirstRoot));
+        Assert.Equal(SharingState.Error, fixture.Controller.Status.State);
+        Assert.Equal(fixture.FirstRoot, Assert.Single(fixture.Controller.RecordingDirectories).Path);
+        Assert.DoesNotContain("duplicate", fixture.Controller.ConfigurationError, StringComparison.OrdinalIgnoreCase);
+
+        Assert.False(await fixture.Controller.SelectFolderAsync(fixture.FirstRoot));
+        Assert.DoesNotContain("duplicate", fixture.Controller.ConfigurationError, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(fixture.FirstRoot, Assert.Single(fixture.Settings.Current.RecordingDirectories).Path);
+
+        listener.Stop();
+
+        Assert.True(await fixture.Controller.SelectFolderAsync(fixture.FirstRoot));
+        Assert.Equal(SharingState.Running, fixture.Controller.Status.State);
+        Assert.Equal(fixture.FirstRoot, Assert.Single(fixture.Controller.RecordingDirectories).Path);
+        Assert.Equal("custom", fixture.Controller.RecordingDirectories[0].Source);
+    }
+
+    [Fact]
+    public async Task Select_folder_accepts_a_relative_path_that_validation_accepts()
+    {
+        var name = "kivo-relative-" + Guid.NewGuid().ToString("N");
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(name));
+        Directory.CreateDirectory(full);
+        try
+        {
+            await using var fixture = new DirectoryControllerFixture();
+            var existing = Directory.CreateDirectory(Path.Combine(fixture.Recordings.Path, "kept")).FullName;
+            fixture.Configure(new RecordingDirectory { Path = existing, Source = "nvidia" });
+            Assert.False(Path.IsPathFullyQualified(name));
+
+            Assert.True(await fixture.Controller.SelectFolderAsync(name));
+
+            Assert.Equal(
+                [existing, full],
+                fixture.Controller.RecordingDirectories.Select(directory => directory.Path).ToArray());
+            Assert.Equal("nvidia", fixture.Controller.RecordingDirectories[0].Source);
+            Assert.Equal("custom", fixture.Controller.RecordingDirectories[1].Source);
+        }
+        finally
+        {
+            if (Directory.Exists(full))
+            {
+                Directory.Delete(full, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Select_folder_rejects_a_duplicate_or_nested_path_without_changing_the_saved_roots()
+    {
+        await using var fixture = new DirectoryControllerFixture();
+        var secondRoot = Directory.CreateDirectory(Path.Combine(fixture.Recordings.Path, "second")).FullName;
+        fixture.Configure(
+            new RecordingDirectory { Path = fixture.FirstRoot, Source = "nvidia" },
+            new RecordingDirectory { Path = secondRoot, Source = "obs" });
+        await fixture.Controller.InitializeAsync();
+        var nested = Directory.CreateDirectory(Path.Combine(fixture.FirstRoot, "nested")).FullName;
+
+        Assert.True(await fixture.Controller.SelectFolderAsync(fixture.FirstRoot.ToUpperInvariant()));
+        Assert.Equal(
+            [fixture.FirstRoot, secondRoot],
+            fixture.Controller.RecordingDirectories.Select(directory => directory.Path).ToArray());
+        var port = fixture.Controller.Status.Port;
+        Assert.False(await fixture.Controller.SelectFolderAsync(nested));
+        Assert.Contains("duplicate", fixture.Controller.ConfigurationError, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Equal(SharingState.Running, fixture.Controller.Status.State);
+        Assert.Equal(port, fixture.Controller.Status.Port);
+        Assert.Equal(
+            [fixture.FirstRoot, secondRoot],
+            fixture.Controller.RecordingDirectories.Select(directory => directory.Path).ToArray());
+        Assert.Equal("nvidia", fixture.Settings.Current.RecordingDirectories[0].Source);
+        Assert.NotNull(fixture.Controller.PairingSnapshot);
+    }
+
+    [Fact]
+    public async Task Select_folder_rejects_an_invalid_path_and_keeps_the_running_share()
+    {
+        await using var fixture = new DirectoryControllerFixture();
+        await fixture.Controller.InitializeAsync();
+        var port = fixture.Controller.Status.Port;
+        var missing = Path.Combine(fixture.Recordings.Path, "missing");
+
+        Assert.False(await fixture.Controller.SelectFolderAsync(missing));
+
+        Assert.Equal(SharingState.Running, fixture.Controller.Status.State);
+        Assert.Equal(port, fixture.Controller.Status.Port);
+        Assert.Contains("does not exist", fixture.Controller.Status.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(fixture.Controller.Status.Detail, fixture.Controller.ConfigurationError);
+        Assert.Equal(fixture.FirstRoot, Assert.Single(fixture.Controller.RecordingDirectories).Path);
+        Assert.NotNull(fixture.Controller.PairingSnapshot);
+    }
+
+    [Fact]
+    public async Task Wpf_settings_replace_only_the_primary_folder()
+    {
+        await using var fixture = new DirectoryControllerFixture();
+        var secondRoot = Directory.CreateDirectory(Path.Combine(fixture.Recordings.Path, "second")).FullName;
+        fixture.Configure(
+            new RecordingDirectory { Path = fixture.FirstRoot, Source = "nvidia" },
+            new RecordingDirectory { Path = secondRoot, Source = "obs" });
+        var replacement = Directory.CreateDirectory(Path.Combine(fixture.Recordings.Path, "replacement")).FullName;
+
+        Assert.True(await fixture.Controller.ApplySettingsAsync(replacement, 18443, sharingEnabled: true));
+
+        Assert.Equal(
+            [replacement, secondRoot],
+            fixture.Controller.RecordingDirectories.Select(directory => directory.Path).ToArray());
+        Assert.Equal("nvidia", fixture.Controller.RecordingDirectories[0].Source);
+        Assert.Equal("obs", fixture.Controller.RecordingDirectories[1].Source);
+        Assert.Equal(18443, fixture.Settings.Current.Port);
+    }
+
+    [Fact]
     public async Task Directory_changes_after_disposal_cannot_persist_or_restart_sharing()
     {
         await using var fixture = new DirectoryControllerFixture();
