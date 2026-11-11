@@ -1,3 +1,4 @@
+using System.Windows.Threading;
 using Kivo.Core.Clips;
 using Kivo.Core.Devices;
 using Kivo.Core.Models;
@@ -20,54 +21,63 @@ public sealed class MainViewModelRevocationTests
     [Fact]
     public async Task Revoke_confirmation_names_device_and_cancel_keeps_pairing()
     {
-        var viewModel = Create(out var devices);
-        string? askedAbout = null;
-        viewModel.ConfirmDeviceRevocation = name =>
+        await StaTest.Run(() =>
         {
-            askedAbout = name;
-            return Task.FromResult(false);
-        };
+            using var viewModel = Create(out var devices);
+            string? askedAbout = null;
+            viewModel.ConfirmDeviceRevocation = name =>
+            {
+                askedAbout = name;
+                return Task.FromResult(false);
+            };
 
-        await viewModel.RevokeDeviceAsync("d1");
+            viewModel.RevokeDeviceAsync("d1").GetAwaiter().GetResult();
 
-        Assert.Equal("My iPhone", askedAbout);
-        Assert.Equal(0, devices.Revocations);
-        Assert.Single(devices.List());
-        Assert.Single(viewModel.Devices);
+            Assert.Equal("My iPhone", askedAbout);
+            Assert.Equal(0, devices.Revocations);
+            Assert.Single(devices.List());
+            Assert.Single(viewModel.Devices);
+        });
     }
 
     [Fact]
     public async Task Confirmed_revocation_removes_exactly_that_device_and_refreshes_the_list()
     {
-        var viewModel = Create(out var devices);
-        devices.Items.Add(
-            new PairedDeviceInfo("d2", "Other phone", "hash2", DateTimeOffset.UtcNow));
-        viewModel.ConfirmDeviceRevocation = _ => Task.FromResult(true);
+        await StaTest.Run(() =>
+        {
+            using var viewModel = Create(out var devices);
+            devices.Items.Add(
+                new PairedDeviceInfo("d2", "Other phone", "hash2", DateTimeOffset.UtcNow));
+            viewModel.ConfirmDeviceRevocation = _ => Task.FromResult(true);
 
-        await viewModel.RevokeDeviceAsync("d1");
+            viewModel.RevokeDeviceAsync("d1").GetAwaiter().GetResult();
 
-        Assert.Equal(1, devices.Revocations);
-        Assert.DoesNotContain(devices.List(), device => device.DeviceId == "d1");
-        Assert.Contains(devices.List(), device => device.DeviceId == "d2");
-        Assert.Single(viewModel.Devices);
-        Assert.Equal("Other phone", viewModel.Devices.Single().Name);
+            Assert.Equal(1, devices.Revocations);
+            Assert.DoesNotContain(devices.List(), device => device.DeviceId == "d1");
+            Assert.Contains(devices.List(), device => device.DeviceId == "d2");
+            Assert.Single(viewModel.Devices);
+            Assert.Equal("Other phone", viewModel.Devices.Single().Name);
+        });
     }
 
     [Fact]
     public async Task Null_device_id_never_reaches_confirmation_or_revocation()
     {
-        var viewModel = Create(out var devices);
-        var asked = false;
-        viewModel.ConfirmDeviceRevocation = _ =>
+        await StaTest.Run(() =>
         {
-            asked = true;
-            return Task.FromResult(true);
-        };
+            using var viewModel = Create(out var devices);
+            var asked = false;
+            viewModel.ConfirmDeviceRevocation = _ =>
+            {
+                asked = true;
+                return Task.FromResult(true);
+            };
 
-        await viewModel.RevokeDeviceAsync(null);
+            viewModel.RevokeDeviceAsync(null).GetAwaiter().GetResult();
 
-        Assert.False(asked);
-        Assert.Equal(0, devices.Revocations);
+            Assert.False(asked);
+            Assert.Equal(0, devices.Revocations);
+        });
     }
 
     private static MainViewModel Create(out FakeDevices devices)
@@ -81,7 +91,10 @@ public sealed class MainViewModelRevocationTests
             devices,
             new FakeFirewallService(),
             new FakeClipPreviewProvider());
-        return new MainViewModel(controller, () => { });
+        // Tests must use the internal overload: the public constructor reads
+        // Application.Current.Dispatcher, which is null outside a WPF app.
+        return new MainViewModel(
+            controller, () => { }, Dispatcher.CurrentDispatcher, TimeProvider.System);
     }
 
     private sealed class FakeSettingsService : ISettingsService

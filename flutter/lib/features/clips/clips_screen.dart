@@ -92,7 +92,12 @@ class _ClipsScreenState extends State<ClipsScreen> {
                     lastSyncUtc: widget.state.lastSyncUtc,
                   ),
                 ),
-                if (widget.state.activeStatus.issue != null)
+                // Offline + cached rows use the list-local stale banner instead
+                // of the top ConnectionProblemBanner so recovery UI is not duplicated.
+                if (widget.state.activeStatus.issue != null &&
+                    !(widget.state.activeStatus.availability ==
+                            DeviceAvailability.offline &&
+                        clips.isNotEmpty))
                   SliverToBoxAdapter(
                       child: ConnectionProblemBanner(
                     status: widget.state.activeStatus,
@@ -165,7 +170,8 @@ class _ClipsScreenState extends State<ClipsScreen> {
         if (offline)
           SliverToBoxAdapter(
             child: _StaleLibraryBanner(
-              detail: widget.state.clipLoadError,
+              detail: widget.state.clipLoadError ??
+                  widget.state.activeStatus.message,
               onRetry: widget.state.refreshClips,
             ),
           ),

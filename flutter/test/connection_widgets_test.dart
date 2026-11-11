@@ -72,8 +72,16 @@ void main() {
       await tester.tap(find.text('Clips'));
       await tester.pumpAndSettle();
       expect(find.text('No recordings on PC'), findsNothing);
-      expect(
-          find.textContaining('Showing cached PC recordings'), findsOneWidget);
+      // Offline failures use the list-local stale banner; other issues keep the
+      // top ConnectionProblemBanner (including its "Showing cached…" copy).
+      final offlineCached = sample.$1 == ApiFailureKind.networkUnreachable;
+      if (offlineCached) {
+        expect(find.text('PC offline · showing the last loaded recordings'),
+            findsOneWidget);
+      } else {
+        expect(find.textContaining('Showing cached PC recordings'),
+            findsOneWidget);
+      }
       await tester.scrollUntilVisible(find.text('cached.mp4'), 100,
           scrollable: find.byType(Scrollable).first);
       expect(find.text('cached.mp4'), findsOneWidget);
@@ -84,7 +92,12 @@ void main() {
       await tester.pumpAndSettle();
       if (sample.$3 == 'Try Again') {
         expect(api.calls, greaterThan(calls));
-        expect(find.text(sample.$2), findsOneWidget);
+        if (offlineCached) {
+          expect(find.text('PC offline · showing the last loaded recordings'),
+              findsOneWidget);
+        } else {
+          expect(find.text(sample.$2), findsOneWidget);
+        }
       } else if (sample.$3 == 'Update instructions') {
         expect(find.text('Update Kivo'), findsOneWidget);
         await tester.tap(find.text('Close'));
