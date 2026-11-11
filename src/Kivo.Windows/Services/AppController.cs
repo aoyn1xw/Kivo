@@ -208,8 +208,27 @@ public sealed class AppController : IAsyncDisposable
             return RejectFolderChoice(result.Error ?? "That folder could not be used.");
         }
 
+        string fullPath;
+        try
+        {
+            fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path!));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
+        {
+            return RejectFolderChoice("That folder path is not valid.");
+        }
+
         var directories = RecordingDirectories.ToList();
-        directories.Add(new RecordingDirectory { Path = path!, Source = "custom" });
+        var alreadySaved = directories.Any(directory =>
+            string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory.Path)),
+                fullPath,
+                StringComparison.OrdinalIgnoreCase));
+        if (!alreadySaved)
+        {
+            directories.Add(new RecordingDirectory { Path = fullPath, Source = "custom" });
+        }
+
         if (await ApplyRecordingDirectoriesAsync(directories).ConfigureAwait(false))
         {
             return true;

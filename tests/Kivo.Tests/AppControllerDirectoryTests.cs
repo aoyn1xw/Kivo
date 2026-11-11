@@ -234,6 +234,63 @@ public sealed class AppControllerDirectoryTests
     }
 
     [Fact]
+    public async Task Select_folder_retries_sharing_after_the_saved_folder_failed_to_start()
+    {
+        await using var fixture = new DirectoryControllerFixture();
+        fixture.Configure();
+        using var listener = new TcpListener(IPAddress.Any, 0);
+        listener.Start();
+        var blockedPort = ((IPEndPoint)listener.LocalEndpoint).Port;
+        fixture.Settings.Update(data => data.Port = blockedPort);
+
+        Assert.False(await fixture.Controller.SelectFolderAsync(fixture.FirstRoot));
+        Assert.Equal(SharingState.Error, fixture.Controller.Status.State);
+        Assert.Equal(fixture.FirstRoot, Assert.Single(fixture.Controller.RecordingDirectories).Path);
+        Assert.DoesNotContain("duplicate", fixture.Controller.ConfigurationError, StringComparison.OrdinalIgnoreCase);
+
+        Assert.False(await fixture.Controller.SelectFolderAsync(fixture.FirstRoot));
+        Assert.DoesNotContain("duplicate", fixture.Controller.ConfigurationError, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(fixture.FirstRoot, Assert.Single(fixture.Settings.Current.RecordingDirectories).Path);
+
+        listener.Stop();
+
+        Assert.True(await fixture.Controller.SelectFolderAsync(fixture.FirstRoot));
+        Assert.Equal(SharingState.Running, fixture.Controller.Status.State);
+        Assert.Equal(fixture.FirstRoot, Assert.Single(fixture.Controller.RecordingDirectories).Path);
+        Assert.Equal("custom", fixture.Controller.RecordingDirectories[0].Source);
+    }
+
+    [Fact]
+    public async Task Select_folder_accepts_a_relative_path_that_validation_accepts()
+    {
+        var name = "kivo-relative-" + Guid.NewGuid().ToString("N");
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(name));
+        Directory.CreateDirectory(full);
+        try
+        {
+            await using var fixture = new DirectoryControllerFixture();
+            var existing = Directory.CreateDirectory(Path.Combine(fixture.Recordings.Path, "kept")).FullName;
+            fixture.Configure(new RecordingDirectory { Path = existing, Source = "nvidia" });
+            Assert.False(Path.IsPathFullyQualified(name));
+
+            Assert.True(await fixture.Controller.SelectFolderAsync(name));
+
+            Assert.Equal(
+                [existing, full],
+                fixture.Controller.RecordingDirectories.Select(directory => directory.Path).ToArray());
+            Assert.Equal("nvidia", fixture.Controller.RecordingDirectories[0].Source);
+            Assert.Equal("custom", fixture.Controller.RecordingDirectories[1].Source);
+        }
+        finally
+        {
+            if (Directory.Exists(full))
+            {
+                Directory.Delete(full, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task Select_folder_rejects_a_duplicate_or_nested_path_without_changing_the_saved_roots()
     {
         await using var fixture = new DirectoryControllerFixture();
@@ -242,12 +299,15 @@ public sealed class AppControllerDirectoryTests
             new RecordingDirectory { Path = fixture.FirstRoot, Source = "nvidia" },
             new RecordingDirectory { Path = secondRoot, Source = "obs" });
         await fixture.Controller.InitializeAsync();
-        var port = fixture.Controller.Status.Port;
         var nested = Directory.CreateDirectory(Path.Combine(fixture.FirstRoot, "nested")).FullName;
 
-        Assert.False(await fixture.Controller.SelectFolderAsync(fixture.FirstRoot.ToUpperInvariant()));
-        Assert.Contains("duplicate", fixture.Controller.ConfigurationError, StringComparison.OrdinalIgnoreCase);
+        Assert.True(await fixture.Controller.SelectFolderAsync(fixture.FirstRoot.ToUpperInvariant()));
+        Assert.Equal(
+            [fixture.FirstRoot, secondRoot],
+            fixture.Controller.RecordingDirectories.Select(directory => directory.Path).ToArray());
+        var port = fixture.Controller.Status.Port;
         Assert.False(await fixture.Controller.SelectFolderAsync(nested));
+        Assert.Contains("duplicate", fixture.Controller.ConfigurationError, StringComparison.OrdinalIgnoreCase);
 
         Assert.Equal(SharingState.Running, fixture.Controller.Status.State);
         Assert.Equal(port, fixture.Controller.Status.Port);
